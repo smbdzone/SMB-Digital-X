@@ -1,0 +1,145 @@
+@import "tailwindcss";
+
+@theme inline {
+  /* ================================
+     BRAND / PRIMARY
+  ================================= */
+
+  --color-charcoal: #242424;
+  --color-charcoal-hover: #181818;
+
+  --color-emerald: #2563eb;
+  --color-emerald-hover: #1d4ed8;
+  --color-emerald-light: #eff6ff;
+
+  /* ================================
+     BACKGROUNDS
+  ================================= */
+
+  --color-background: #f7f6f2;
+  --color-surface: #ffffff;
+  --color-surface-soft: #f1f0eb;
+
+  /* ================================
+     TEXT
+  ================================= */
+
+  --color-text: #242424;
+  --color-text-secondary: #6b6b6b;
+  --color-text-muted: #929292;
+
+  /* ================================
+     BORDER
+  ================================= */
+
+  --color-border: #e5e2da;
+  --color-border-light: #eeece7;
+
+  /* ================================
+     STATUS
+  ================================= */
+
+  --color-success: #16845b;
+  --color-success-light: #e8f5ef;
+
+  --color-error: #c0392b;
+  --color-error-light: #fbeceb;
+
+  --color-warning: #c88a16;
+  --color-warning-light: #fff5dc;
+
+  /* ================================
+     VAT / TAX
+  ================================= */
+
+  --color-violet: #7c3aed;
+  --color-violet-light: #f1ebff;
+
+  /* ================================
+     FINANCIAL
+  ================================= */
+
+  --color-income: #16845b;
+  --color-expense: #c0392b;
+
+  /* ================================
+     FONTS
+  ================================= */
+
+  --font-heading: var(--font-manrope), sans-serif;
+  --font-body: var(--font-inter), sans-serif;
+  /* ================================
+     RADIUS
+  ================================= */
+
+  --radius-brand: 10px;
+  --radius-card: 12px;
+  --radius-button: 8px;
+}
+
+:root {
+  --background: #f7f6f2;
+  --foreground: #242424;
+
+  --surface: #ffffff;
+  --surface-soft: #f1f0eb;
+
+  --border: #e5e2da;
+  --border-light: #eeece7;
+
+  --text: #242424;
+  --text-secondary: #6b6b6b;
+  --text-muted: #929292;
+
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+
+  --success: #16845b;
+  --warning: #c88a16;
+  --error: #c0392b;
+
+  --vat: #7c3aed;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-inter), sans-serif;
+}
+
+/* ================================
+   HEADINGS
+================================ */
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  font-family: var(--font-manrope), sans-serif;
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* ================================
+   LINKS / BUTTONS
+================================ */
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ================================
+   SELECTION
+================================ */
+
+::selection {
+  background: #dbeafe;
+  color: #242424;
+}

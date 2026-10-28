@@ -1,0 +1,45 @@
+{
+  "name": "expense-managment-smb",
+  "version": "1.0.0",
+  "description": "",
+  "main": "server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "migrate": "tsx src/scripts/migrate-company-salary.ts",
+    "migrate:eod": "tsx src/scripts/migrate-eod-datekey.ts"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "module",
+  "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cloudinary": "^2.11.0",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.9.3",
+    "morgan": "^1.11.0",
+    "multer": "^2.3.0",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^9.0.5",
+    "pdfkit": "^0.17.2",
+    "socket.io": "^4.8.3"
+  },
+  "devDependencies": {
+    "@types/bcrypt": "^6.0.0",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/morgan": "^1.9.10",
+    "@types/multer": "^2.2.0",
+    "@types/node": "^26.2.0",
+    "@types/nodemailer": "^8.0.1",
+    "@types/pdfkit": "^0.17.7",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}

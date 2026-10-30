@@ -1,7 +1,8 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
-import { FiPlus, FiEdit, FiTrash2 } from 'react-icons/fi'
+import { FiPlus, FiEdit, FiTrash2, FiClock } from 'react-icons/fi'
+import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import {
@@ -223,6 +224,9 @@ const Employees = () => {
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                     <div className="flex items-center gap-3">
+                      {emp.role !== 'admin' && (
+                        <Link href={`/employee-history?employee=${emp._id}`} className="text-charcoal/60 hover:text-charcoal transition" title="History"><FiClock className="size-4" /></Link>
+                      )}
                       <button onClick={() => handleOpenModal(emp)} className="text-blue-600 hover:text-blue-900 transition" title="Edit"><FiEdit className="size-4" /></button>
                       <button onClick={() => handleDelete(emp._id)} className="text-red-600 hover:text-red-900 transition" title="Delete"><FiTrash2 className="size-4" /></button>
                     </div>

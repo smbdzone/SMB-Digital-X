@@ -15,7 +15,10 @@ import salaryRoutes from './routes/salary.routes.js';
 import companyRoutes from './routes/company.routes.js';
 import chatRoutes from './routes/chat.routes.js';
 import certificateRoutes from './routes/certificate.routes.js';
-import { cleanupMedia, createSalaryDocuments } from './utils/cron-jobs.js';
+import employeeHistoryRoutes from './routes/employeeHistory.routes.js';
+import milestoneRoutes from './routes/milestone.routes.js';
+import pushRoutes from './routes/push.routes.js';
+import { cleanupMedia, createSalaryDocuments, unreadChatReminders } from './utils/cron-jobs.js';
 import { isVerified } from './middlewares/isVerified.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 
@@ -25,6 +28,7 @@ dbConnection();
 
 createSalaryDocuments.start()
 cleanupMedia.start();
+unreadChatReminders.start();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -53,6 +57,9 @@ app.use("/api/salary", salaryRoutes);             // auth is applied inside the 
 app.use("/api/companies", companyRoutes);         // auth is applied inside the router
 app.use("/api/chat", chatRoutes);
 app.use("/api/certificates", certificateRoutes);   // auth is applied inside the router
+app.use("/api/employee-history", employeeHistoryRoutes); // auth is applied inside the router
+app.use("/api/milestones", milestoneRoutes);              // auth is applied inside the router
+app.use("/api/push", pushRoutes);                          // auth is applied inside the router
 
 // Health check route
 app.get('/api/health', (req, res) => {

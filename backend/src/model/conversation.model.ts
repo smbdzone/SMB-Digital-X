@@ -11,6 +11,7 @@ export interface IConversation extends Document {
   lastMessage: mongoose.Types.ObjectId | null;
   createdAt: Date;
   updatedAt: Date;
+  reminderSentAt: Map<string, Date>;
 }
 
 const conversationSchema = new mongoose.Schema<IConversation>(
@@ -48,6 +49,7 @@ const conversationSchema = new mongoose.Schema<IConversation>(
       },
       default: {},
     },
+    reminderSentAt: { type: Map, of: Date, default: {} },
 
     lastMessage: {
       type: mongoose.Types.ObjectId,

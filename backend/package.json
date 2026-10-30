@@ -27,12 +27,14 @@
     "node-cron": "^4.6.0",
     "nodemailer": "^9.0.5",
     "pdfkit": "^0.17.2",
-    "socket.io": "^4.8.3"
+    "socket.io": "^4.8.3",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@types/bcrypt": "^6.0.0",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
+    "@types/web-push": "^3.6.4",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/morgan": "^1.9.10",
     "@types/multer": "^2.2.0",

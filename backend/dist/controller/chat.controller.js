@@ -5,6 +5,7 @@ import conversationModel from '../model/conversation.model.js';
 import messageModel from '../model/message.model.js';
 import User from '../model/user.model.js';
 import { createConversationService } from '../utils/createConversation.js';
+import { sendPushToUsers } from '../services/push.service.js';
 import { deleteFromCloudinary, uploadToCloudinary } from '../utils/cloudinary.js';
 import { conversationRoom, emitConversationUpdate, emitToUsers, getViewerIds, leaveConversationRoom, unreadKey, userRoom, } from '../utils/chat.socket.js';
 import { asObjectId, asText, badRequest, forbidden, getAuth, isAdmin, isObjectId, notFound, paramId, queryString, } from '../utils/http.js';
@@ -385,6 +386,22 @@ export const createMessage = async (req, res) => {
     io?.to(conversationRoom(conversationId)).emit('new-message', populatedMessage);
     // ...and every participant's list row + unread badge is updated, wherever they are in the app.
     await emitConversationUpdate(io, conversationId);
+    // Browser push for everybody who is NOT looking at this chat right now.
+    // IMPORTANT: it is no longer limited to users without a socket. On phones the socket stays "connected"
+    // for a while after the screen locks / the app is switched (or the tab is frozen), so those users were
+    // wrongly treated as online and never got a push. Duplicates are avoided because the page notification
+    // and the push use the same `tag` (chat-<conversationId>): the newer one replaces the older one.
+    // Runs in the background: sending is not slowed down.
+    void (async () => {
+        const senderName = populatedMessage?.senderId?.name ?? 'New message';
+        const recipients = participants.filter(p => !readBy.includes(p));
+        await sendPushToUsers(recipients, {
+            title: conversation.type === 'group' ? `${conversation.name || 'Group'} · ${senderName}` : senderName,
+            body: text ? text.slice(0, 120) : 'Sent an attachment',
+            url: `/chat?conversationId=${conversationId}`,
+            tag: `chat-${conversationId}`,
+        });
+    })().catch(err => console.error('Push notification error:', err));
     res.status(201).json({ success: true, message: 'Message sent', data: populatedMessage });
 };
 // GET /api/chat/message/:conversationId?limit=50&before=<messageId>&markRead=true

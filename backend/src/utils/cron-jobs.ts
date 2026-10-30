@@ -3,6 +3,7 @@ import mongoose from 'mongoose';
 import messageModel from '../model/message.model.js';
 import { deleteFromCloudinary } from '../utils/cloudinary.js';
 import { currentMonth, generateMonthlySalaries } from '../services/salary.service.js';
+import { sendUnreadChatReminders } from '../services/chatReminder.service.js';
 
 const PAYROLL_TIMEZONE = process.env.PAYROLL_TIMEZONE || 'Asia/Dubai';
 
@@ -60,5 +61,19 @@ export const cleanupMedia = cron.schedule('0 * * * *', async () => {
         console.log(`Media cleanup completed. Processed ${messages.length} messages.`);
     } catch (error) {
         console.error('Error in media cleanup cron job:', error);
+    }
+});
+
+
+let reminderRunning = false;
+export const unreadChatReminders = cron.schedule('* * * * *', async () => {
+    if (reminderRunning) return;
+    reminderRunning = true;
+    try {
+        await sendUnreadChatReminders();
+    } catch (error) {
+        console.error('[chat-reminder] job failed:', error);
+    } finally {
+        reminderRunning = false;
     }
 });

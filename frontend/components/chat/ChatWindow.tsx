@@ -158,6 +158,14 @@ const ChatWindow = () => {
     const fileInputRef = useRef<HTMLInputElement>(null);
     // set before older messages are prepended, used to keep the scroll position
     const restoreScrollRef = useRef<{ height: number; top: number } | null>(null);
+    // true while a chat is being opened: scroll to the newest message once it is rendered
+    const initialScrollRef = useRef(false);
+    // true while the user is at the bottom: keeps the view there when images/videos finish loading
+    const pinnedRef = useRef(false);
+    // the message input (used to focus it when the user starts typing anywhere)
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
+    // set when a message is sent so the input gets focus back once it is enabled again
+    const refocusAfterSendRef = useRef(false);
 
     const [messages, setMessages] = useState<Message[]>([]);
     const [hasMore, setHasMore] = useState(false);
@@ -208,12 +216,11 @@ const ChatWindow = () => {
         setNewMessages(0);
     }, []);
 
-    const scrollToMessage = useCallback((messageId: string) => {
+    // Images / videos change the height when they finish loading: stay at the bottom if the user is there.
+    const keepPinned = () => {
         const container = containerRef.current;
-        if (!container) return;
-        const target = container.querySelector(`[data-message-id="${messageId}"]`);
-        target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }, []);
+        if (container && pinnedRef.current) container.scrollTop = container.scrollHeight;
+    };
 
     // After older messages were added on top, keep what the user was looking at in place.
     useLayoutEffect(() => {
@@ -224,6 +231,15 @@ const ChatWindow = () => {
             restoreScrollRef.current = null;
         }
     }, [messages]);
+
+    // First open of a chat: jump to the newest message AFTER the messages are rendered (no animation).
+    useLayoutEffect(() => {
+        if (!initialScrollRef.current || loading) return;
+        const container = containerRef.current;
+        if (!container) return;
+        container.scrollTop = container.scrollHeight;
+        if (messages.length > 0) initialScrollRef.current = false;
+    }, [loading, messages]);
 
     // ============================================================
     // OPEN CONVERSATION
@@ -239,6 +255,8 @@ const ChatWindow = () => {
         }
 
         let cancelled = false;
+        initialScrollRef.current = true;
+        pinnedRef.current = true;
         setMessages([]);
         setHasMore(false);
         setNewMessages(0);
@@ -261,20 +279,6 @@ const ChatWindow = () => {
                 setMessages((prev) => mergeMessages(prev, loaded));
                 setHasMore(Boolean(response.pagination?.hasMore));
 
-                // first message from someone else that this user has not read (found BEFORE marking as read)
-                const me = myIdRef.current;
-                const firstUnread = me
-                    ? loaded.find((msg) => msg.senderId?._id !== me && !(msg.readBy ?? []).includes(me))
-                    : undefined;
-
-                requestAnimationFrame(() => {
-                    if (firstUnread) {
-                        scrollToMessage(firstUnread._id);
-                    } else {
-                        scrollToBottom('auto');
-                    }
-                });
-
                 // Fetching messages does not mark them read on the backend: do it explicitly.
                 void markRead(conversationId);
             } catch (error) {
@@ -292,7 +296,7 @@ const ChatWindow = () => {
         return () => {
             cancelled = true;
         };
-    }, [token, conversationId, clearUnread, markRead, scrollToBottom, scrollToMessage]);
+    }, [token, conversationId, clearUnread, markRead]);
 
     // ============================================================
     // KEEP THE ROOM JOINED (reconnects) + LEAVE ON CLOSE
@@ -338,6 +342,43 @@ const ChatWindow = () => {
             void Notification.requestPermission();
         }
     }, []);
+
+    // ============================================================
+    // TYPE ANYWHERE: pressing a character key focuses the message input,
+    // so the user does not have to click it first. The key is typed into it.
+    // ============================================================
+
+    useEffect(() => {
+        if (!conversationId || !conversation) return;
+
+        const handleKeyPress = (e: KeyboardEvent) => {
+            if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey) return;
+            if (showParticipantModal) return;
+
+            // a printable character, or the first key of an IME composition (Urdu, Arabic, Chinese...)
+            if (e.key.length !== 1 && e.key !== 'Process') return;
+
+            const target = e.target as HTMLElement | null;
+            const tag = target?.tagName;
+            // already typing somewhere (this input, the search box, a form field...)
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target?.isContentEditable) return;
+            // Space on a focused button / link must keep working as a click
+            if ((tag === 'BUTTON' || tag === 'A') && e.key === ' ') return;
+
+            textareaRef.current?.focus();
+        };
+
+        window.addEventListener('keydown', handleKeyPress);
+        return () => window.removeEventListener('keydown', handleKeyPress);
+    }, [conversationId, conversation, showParticipantModal]);
+
+    // After sending, the input is disabled for a moment and loses focus: give it back.
+    useEffect(() => {
+        if (!sending && refocusAfterSendRef.current) {
+            refocusAfterSendRef.current = false;
+            textareaRef.current?.focus();
+        }
+    }, [sending]);
 
     // ============================================================
     // REALTIME: new-message / message-deleted / messages-read  (conversation room)
@@ -442,6 +483,7 @@ const ChatWindow = () => {
         if (!text && selectedFiles.length === 0) return;
         if (sending) return;
 
+        refocusAfterSendRef.current = true;
         setSending(true);
 
         const formData = new FormData();
@@ -624,7 +666,9 @@ const ChatWindow = () => {
                 <div
                     ref={containerRef}
                     onScroll={() => {
-                        if (isNearBottom()) setNewMessages(0);
+                        const near = isNearBottom();
+                        pinnedRef.current = near;
+                        if (near) setNewMessages(0);
                     }}
                     className="relative flex-1 overflow-y-auto p-4 scrollbar-thin scrollbar-thumb-charcoal"
                 >
@@ -723,6 +767,7 @@ const ChatWindow = () => {
                                                                         <img
                                                                             src={att.url}
                                                                             alt={filename}
+                                                                            onLoad={keepPinned}
                                                                             className="max-h-64 max-w-full rounded-lg object-contain"
                                                                         />
                                                                         {downloadBtn(
@@ -734,6 +779,7 @@ const ChatWindow = () => {
                                                                         <video
                                                                             controls
                                                                             preload="metadata"
+                                                                            onLoadedMetadata={keepPinned}
                                                                             className="max-h-64 max-w-full rounded-lg"
                                                                         >
                                                                             <source src={att.url} />
@@ -866,6 +912,7 @@ const ChatWindow = () => {
                         />
 
                         <textarea
+                            ref={textareaRef}
                             value={message}
                             onChange={(e) => setMessage(e.target.value.slice(0, MAX_TEXT))}
                             onKeyDown={handleKeyDown}

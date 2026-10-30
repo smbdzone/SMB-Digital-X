@@ -12,6 +12,7 @@ import {
 import Cookies from "js-cookie";
 
 import { APP_STORAGE_KEYS } from "@/lib/config";
+import { disablePush } from "@/lib/push";
 import {
     login,
     type LoginPayload,
@@ -202,8 +203,10 @@ export const AuthProvider = ({
     // Logout.
 
     const logout = useCallback(() => {
+        // Stop browser push for this user on this device (best effort), before the token is cleared.
+        if (token) void disablePush(token);
         clearSession();
-    }, [clearSession]);
+    }, [clearSession, token]);
 
     /*
      * Clear current error.

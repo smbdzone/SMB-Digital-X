@@ -1,19 +1,37 @@
+'use client'
+
+import React, { Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import ChatSidebar from '@/components/chat/ChatSidebar'
 import ChatWindow from '@/components/chat/ChatWindow'
-import React from 'react'
+import EnableNotifications from '@/components/chat/EnableNotifications'
 
-const page = async () => {
+const ChatLayout = () => {
+    const searchParams = useSearchParams()
+    const hasConversation = Boolean(searchParams.get('conversationId'))
 
     return (
+        <>
+        <EnableNotifications />
         <div className='grid items-start grid-cols-4 gap-0'>
-            <div className='col-span-1 hidden lg:block'>
+            {/* Mobile: the conversation list, hidden once a chat is open. Large screens: always shown, as before. */}
+            <div className={`col-span-4 lg:col-span-1 ${hasConversation ? 'hidden lg:block' : 'block'}`}>
                 <ChatSidebar />
             </div>
-            <div className='col-span-4 lg:col-span-3'>
+
+            {/* Mobile: only shown after a conversation is selected. Large screens: always shown, as before. */}
+            <div className={`col-span-4 lg:col-span-3 ${hasConversation ? 'block' : 'hidden lg:block'}`}>
                 <ChatWindow />
             </div>
         </div>
+        </>
     )
 }
+
+const page = () => (
+    <Suspense fallback={null}>
+        <ChatLayout />
+    </Suspense>
+)
 
 export default page

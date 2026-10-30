@@ -81,6 +81,8 @@ export const getDashboard = async (
 
         const expenseStats =
             await Expense.aggregate([
+                // only approved / reimbursed expenses count (not pending or rejected)
+                { $match: { status: { $in: ["approved", "reimbursed"] } } },
                 {
                     $group: {
                         _id: null,
@@ -104,6 +106,7 @@ export const getDashboard = async (
             await Expense.aggregate([
                 {
                     $match: {
+                        status: { $in: ["approved", "reimbursed"] },
                         date: {
                             $gte: startOfMonth,
                             $lt: startOfNextMonth,
@@ -191,6 +194,7 @@ export const getDashboard = async (
 
         const expenseByProject =
             await Expense.aggregate([
+                { $match: { status: { $in: ["approved", "reimbursed"] } } },
                 {
                     $group: {
                         _id: "$projectId",

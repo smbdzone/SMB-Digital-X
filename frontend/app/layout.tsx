@@ -24,6 +24,14 @@ const manrope = Manrope({
 export const metadata: Metadata = {
   title: "Expense Management System",
   description: "Employee, expense, salary and tax management system",
+  // Needed for push notifications on iPhone: the site must be installable ("Add to Home Screen").
+  manifest: "/manifest.webmanifest",
+  icons: {
+    apple: "/apple-touch-icon-1.png",
+    icon: '/icon-192-1.png',
+    shortcut: '/icon-512-1.png'
+  },
+  appleWebApp: { capable: true, title: "Team Portal", statusBarStyle: "default" },
 };
 
 export default function RootLayout({

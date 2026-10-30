@@ -13,6 +13,7 @@ import {
     FiHome as Home,
     FiFileText as FileText,
     FiAward as Award,
+    FiClock as History,
 } from "react-icons/fi";
 import { TfiReceipt as Receipt } from "react-icons/tfi";
 import {
@@ -41,6 +42,11 @@ const adminNavigation = [
                 label: "Employees",
                 href: "/employees",
                 icon: Users,
+            },
+            {
+                label: "Employee History",
+                href: "/employee-history",
+                icon: History,
             },
             {
                 label: "Expenses",
@@ -129,6 +135,11 @@ const employeeNavigation = [
                 label: "My Certificates",
                 href: "/my-certificates",
                 icon: Award,
+            },
+            {
+                label: "My History",
+                href: "/my-history",
+                icon: History,
             },
             {
                 label: "EOD Reports",

@@ -67,9 +67,12 @@ const populateExpense = <T extends { populate: (...args: any[]) => T }>(query: T
         .populate('addedBy', POPULATE_USER)
         .populate('companyId', POPULATE_COMPANY)
 
-// Totals per currency. Rejected expenses are not counted unless you filter for them explicitly.
+// Totals per currency. Only approved and reimbursed expenses count as real spending.
+// Pending (waiting for approval) and rejected ones are left out, unless you filter for that status explicitly.
+const COUNTED_STATUSES = ['approved', 'reimbursed']
+
 const totalsByCurrency = async (filter: Record<string, unknown>) => {
-    const match = filter.status ? filter : { ...filter, status: { $ne: 'rejected' } }
+    const match = filter.status ? filter : { ...filter, status: { $in: COUNTED_STATUSES } }
     const rows = await Expense.aggregate([
         { $match: match },
         { $group: { _id: '$currency', total: { $sum: '$totalAmount' }, count: { $sum: 1 } } },

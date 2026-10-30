@@ -17,6 +17,8 @@ import {
   markConversationRead,
 } from '@/services/chat.services';
 import { socket, connectSocket, disconnectSocket } from '@/lib/socket';
+import { showChatNotification } from '@/lib/notify';
+import { enablePush } from '@/lib/push';
 
 export type { Conversation } from '@/services/chat.services';
 
@@ -64,7 +66,7 @@ const sortByRecent = (list: Conversation[]) =>
   [...list].sort((a, b) => timeOf(b) - timeOf(a));
 
 export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
-  const { token } = useAuth();
+  const { token, user } = useAuth();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [loading, setLoading] = useState(false);
@@ -77,6 +79,24 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     conversationsRef.current = conversations;
   }, [conversations]);
+
+  // Latest user id / unread counts for socket handlers
+  const myIdRef = useRef<string | undefined>(undefined);
+  const unreadRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    myIdRef.current = user?.id ?? user?._id;
+    unreadRef.current = unreadCounts;
+  });
+
+  // After login: if the user already allowed notifications, register this browser for Web Push again
+  // (keeps the saved subscription fresh). We do NOT ask for permission here any more: mobile browsers
+  // (Android Chrome, iOS Safari) ignore/block permission prompts that do not come from a tap.
+  // The prompt is shown by <EnableNotifications /> (a button on the chat page).
+  useEffect(() => {
+    if (!token) return;
+    if (typeof window === 'undefined' || !('Notification' in window)) return;
+    if (Notification.permission === 'granted') void enablePush(token);
+  }, [token]);
 
   const loadRequest = useRef(0);
 
@@ -161,6 +181,22 @@ export const ChatProvider = ({ children }: { children: React.ReactNode }) => {
     // New last message / new updatedAt / this user's unread count
     const handleConversationUpdated = (data: ConversationUpdatedEvent) => {
       if (!data?.conversationId) return;
+
+      // A new message from someone else raised my unread count = I am not looking at that chat
+      // (the server does not count messages as unread for people who have the chat open).
+      // Show a browser notification on whatever page I am.
+      const last = data.lastMessage;
+      const senderId = last?.senderId?._id;
+      const previousUnread = unreadRef.current[data.conversationId] ?? 0;
+      if (last && senderId && String(senderId) !== String(myIdRef.current) && Number(data.unreadCount) > previousUnread) {
+        const conv = conversationsRef.current.find((c) => c._id === data.conversationId);
+        const senderName = last.senderId?.name || 'New message';
+        showChatNotification({
+          title: conv?.type === 'group' ? `${conv.name || 'Group'} · ${senderName}` : senderName,
+          body: last.text || 'Sent an attachment',
+          conversationId: data.conversationId,
+        });
+      }
 
       const known = conversationsRef.current.some((c) => c._id === data.conversationId);
       if (!known) {

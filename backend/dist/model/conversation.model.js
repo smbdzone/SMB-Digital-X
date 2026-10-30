@@ -29,6 +29,7 @@ const conversationSchema = new mongoose.Schema({
         },
         default: {},
     },
+    reminderSentAt: { type: Map, of: Date, default: {} },
     lastMessage: {
         type: mongoose.Types.ObjectId,
         ref: 'message',

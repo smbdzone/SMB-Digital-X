@@ -6,6 +6,7 @@ import dotenv from 'dotenv';
 import conversationModel from './model/conversation.model.js';
 import { isObjectId } from './utils/http.js';
 import { conversationRoom, userRoom } from './utils/chat.socket.js';
+import { checkAllLetterheadAssets } from './email/letterheads.js';
 
 dotenv.config();
 
@@ -90,5 +91,8 @@ const PORT = process.env.PORT || 5000;
 server.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });
+
+// Letters need backend/assets (fonts + letterhead artwork). Warn loudly at startup if it was not deployed.
+checkAllLetterheadAssets();
 
 export { io };

@@ -42,6 +42,13 @@ export interface SalarySlipData {
     approvedBy: string;
     approvedByTitle?: string;
     signature?: string;
+    // Extra fields for the PDF payslip. All optional, so the HTML slip and older callers keep working.
+    employeeEmail?: string;
+    // TODO: fill from a real `employeeCode` field on the user profile once it exists. Until then it
+    // stays empty and the PDF prints "-" (a database id is not a meaningful employee number).
+    employeeCode?: string;
+    slipNo?: string;      // e.g. "PS-2026-11-3F9A2C"
+    draft?: boolean;      // unpaid record: the PDF is watermarked DRAFT
 }
 
 /** Escapes user-controlled text before it is placed in HTML (prevents HTML injection in emails). */

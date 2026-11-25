@@ -8,6 +8,9 @@ import {
     teamDay,
 } from "../services/deliverable.service.js";
 import { asDayKey, dayKey } from "../utils/dates.js";
+import {
+    notifyItemAddedToSubmittedPlan, notifyPlanApproved, notifyPlanChanged, notifyPlanSubmitted,
+} from "../services/deliverableNotify.js";
 
 /* ------------------------------------------------------------------ */
 /* Employee: own plan                                                  */
@@ -39,9 +42,11 @@ export const createDeliverable = async (req: Request, res: Response): Promise<vo
         const employee = await loadPlanOwner(b.employeeId, viewer);
         const fields = await parseItemFields(b, { requireTitle: true, employeeId: String(employee._id), byApprover: true });
         item = await createItemForEmployee(viewer, employee, date, fields);
+        notifyPlanChanged(viewer, String(employee._id), date, "added", item.title);
     } else {
         const fields = await parseItemFields(b, { requireTitle: true, employeeId: viewer.id, byApprover: false });
         item = await createOwnItem(viewer, date, fields);
+        if (item.approvalStatus === "pending") notifyItemAddedToSubmittedPlan(viewer, date, item.title);
     }
 
     const data = await populateItems(Deliverable.findById(item._id)).lean();
@@ -54,6 +59,7 @@ export const updateDeliverable = async (req: Request, res: Response): Promise<vo
     const item = await Deliverable.findById(paramId(req));
     if (!item) throw notFound("Deliverable not found");
 
+    let notifyEmployee = false;
     if (String(item.employeeId) === viewer.id) {
         assertOwnerCanChange(item, viewer, "edit");
         const fields = await parseItemFields(req.body ?? {}, { requireTitle: false, employeeId: viewer.id, byApprover: false });
@@ -62,9 +68,11 @@ export const updateDeliverable = async (req: Request, res: Response): Promise<vo
         if (!viewer.canApprove) throw forbidden();
         assertNotOwnPlan(item.employeeId, viewer);
         const fields = await parseItemFields(req.body ?? {}, { requireTitle: false, employeeId: String(item.employeeId), byApprover: true });
-        applyApproverEdit(item, fields, viewer);
+        // Changes to a pending plan are announced when it is approved; changes after approval right away.
+        notifyEmployee = applyApproverEdit(item, fields, viewer) && item.approvalStatus === "approved";
     }
     await item.save();
+    if (notifyEmployee) notifyPlanChanged(viewer, String(item.employeeId), item.dateKey, "edited", item.title);
 
     const data = await populateItems(Deliverable.findById(item._id)).lean();
     res.status(200).json({ success: true, message: "Deliverable updated", data });
@@ -76,7 +84,8 @@ export const deleteDeliverable = async (req: Request, res: Response): Promise<vo
     const item = await Deliverable.findById(paramId(req));
     if (!item) throw notFound("Deliverable not found");
 
-    if (String(item.employeeId) === viewer.id) {
+    const byApprover = String(item.employeeId) !== viewer.id;
+    if (!byApprover) {
         assertOwnerCanChange(item, viewer, "remove");
     } else {
         if (!viewer.canApprove) throw forbidden();
@@ -84,6 +93,7 @@ export const deleteDeliverable = async (req: Request, res: Response): Promise<vo
         if (item.reportedAt) throw conflict("This item was already reported in an EOD report");
     }
     await item.deleteOne();
+    if (byApprover) notifyPlanChanged(viewer, String(item.employeeId), item.dateKey, "removed", item.title);
     res.status(200).json({ success: true, message: "Deliverable removed" });
 };
 
@@ -128,6 +138,7 @@ export const submitMyDay = async (req: Request, res: Response): Promise<void> =>
     const viewer = await loadViewer(getAuth(req));
     const date = asPlanDay(req.body?.date);
     const submitted = await submitOwnDay(viewer, date);
+    notifyPlanSubmitted(viewer, date, submitted);
     res.status(200).json({
         success: true,
         message: "Plan submitted for approval",
@@ -181,6 +192,9 @@ export const approve = async (req: Request, res: Response): Promise<void> => {
     const viewer = await loadViewer(getAuth(req));
     requireApprover(viewer);
     const results = await approvePlans(viewer, asPlanRefs(req.body?.plans));
+    for (const r of results) {
+        if (r.approved > 0) notifyPlanApproved(viewer, r.employeeId, r.date);
+    }
     const approved = results.reduce((n, r) => n + r.approved, 0);
     const skippedOwn = results.some(r => r.skipped === "own plan");
     res.status(200).json({

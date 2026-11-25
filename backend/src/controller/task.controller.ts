@@ -2,6 +2,10 @@ import { Request, Response } from "express";
 import Task from "../model/task.model.js";
 import projectModel from "../model/project.model.js";
 import mongoose from "mongoose";
+import { isObjectId } from "../utils/http.js";
+
+// Fields an employee may change on their own task.
+const EMPLOYEE_TASK_FIELDS = ["status", "progress", "notes"];
 
 export const assignProject = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -82,6 +86,10 @@ export const assignProject = async (req: Request, res: Response): Promise<void> 
 export const getSingleTask = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
+        if (!isObjectId(id)) {
+            res.status(400).json({ success: false, message: 'Invalid id' });
+            return;
+        }
 
         const task = await Task.findById(id).populate([
             { path: 'projectId', select: 'name category clientName' },
@@ -93,6 +101,13 @@ export const getSingleTask = async (req: Request, res: Response): Promise<void> 
                 success: false,
                 message: 'Task not found'
             })
+            return;
+        }
+
+        // Employees can only open tasks assigned to them.
+        const assigneeId = String((task.assignedTo as any)?._id ?? task.assignedTo);
+        if (req.user.role !== 'admin' && assigneeId !== String(req.user.id)) {
+            res.status(403).json({ success: false, message: 'You can only view tasks assigned to you' });
             return;
         }
 
@@ -145,6 +160,10 @@ export const taskByProject = async (req: Request, res: Response): Promise<void> 
 export const updateTask = async (req: Request, res: Response): Promise<void> => {
     try {
         const { id } = req.params;
+        if (!isObjectId(id)) {
+            res.status(400).json({ success: false, message: "Invalid id" });
+            return;
+        }
 
         // --------------------------------------------------
         // Find existing task
@@ -158,6 +177,20 @@ export const updateTask = async (req: Request, res: Response): Promise<void> => 
                 message: "Task not found"
             });
             return;
+        }
+
+        // Employees may only update the status / progress / notes of a task assigned to them
+        // (the "My Tasks" page). Everything else is admin only.
+        if (req.user.role !== "admin") {
+            if (String(existingTask.assignedTo) !== String(req.user.id)) {
+                res.status(403).json({ success: false, message: "You can only update tasks assigned to you" });
+                return;
+            }
+            const notAllowed = Object.keys(req.body ?? {}).filter(key => !EMPLOYEE_TASK_FIELDS.includes(key));
+            if (notAllowed.length) {
+                res.status(403).json({ success: false, message: `You cannot change: ${notAllowed.join(", ")}` });
+                return;
+            }
         }
 
         const {

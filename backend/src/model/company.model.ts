@@ -19,7 +19,7 @@ export interface ICompany extends Document {
     signatory: {
         name?: string       // "Approved by" on the slip
         title?: string
-        signature?: string  // typed signature text
+        signature?: string  // typed signature text, used on SALARY SLIPS only (letters use the signature image flow)
     }
     isActive: boolean
     createdAt: Date

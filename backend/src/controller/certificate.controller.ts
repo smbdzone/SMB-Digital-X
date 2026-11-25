@@ -11,6 +11,7 @@ import {
     asDate, asText, badRequest, conflict, escapeRegex, forbidden, getAuth, isAdmin, isObjectId,
     notFound, paramId, parsePagination, queryString,
 } from '../utils/http.js'
+import { parseSignatureImage, wipe } from '../utils/signatureImage.js'
 
 /* ------------------------------------------------------------------ */
 /* Input parsing                                                       */
@@ -53,9 +54,23 @@ const parseSignatory = (value: unknown): IssueInput['signatory'] => {
     return {
         name: asText(v.name, 'signatory.name', { max: 100 }),
         title: asText(v.title, 'signatory.title', { max: 100 }),
-        signature: asText(v.signature, 'signatory.signature', { max: 100 }),
     }
 }
+
+/**
+ * Takes the owner's signature image out of the request body (so nothing later can log or keep it) and validates it.
+ * Only the admin (the owner) may sign. The caller must wipe() the buffer when the request is done.
+ */
+const takeSignature = (req: Request): Buffer | undefined => {
+    const raw = req.body?.signatureImage
+    if (req.body && 'signatureImage' in req.body) delete req.body.signatureImage
+    if (raw === undefined || raw === null || raw === '') return undefined
+    if (!isAdmin(getAuth(req))) throw forbidden('Only the owner can sign documents')
+    return parseSignatureImage(raw)?.image
+}
+
+const SIGNED_NEEDS_EMAIL = 'A signed document has to be emailed: the email is the only copy that carries the signature. '
+    + 'Turn on "Send email" or remove the signature.'
 
 const parseIssueInput = (b: any): IssueInput => {
     const templateId = b.templateId ? String(b.templateId) : undefined
@@ -108,10 +123,17 @@ export const previewCertificate = async (req: Request, res: Response): Promise<v
 export const previewCertificatePdf = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const b = req.body ?? {}
-    if (!isObjectId(b.employeeId)) throw badRequest('employeeId is required')
+    const signature = takeSignature(req)
+    if (!isObjectId(b.employeeId)) { wipe(signature); throw badRequest('employeeId is required') }
 
-    const ctx = await createIssueContext(auth.id, parseIssueInput(b))
-    const pdf = await previewOnePdf(ctx, b.employeeId)
+    let pdf: Buffer
+    try {
+        const ctx = await createIssueContext(auth.id, parseIssueInput(b))
+        ctx.signature = signature
+        pdf = await previewOnePdf(ctx, b.employeeId)
+    } finally {
+        wipe(signature)
+    }
     res.setHeader('Content-Type', 'application/pdf')
     res.setHeader('Content-Length', String(pdf.length))
     res.setHeader('Cache-Control', 'private, no-store')
@@ -130,10 +152,20 @@ export const previewCertificatePdf = async (req: Request, res: Response): Promis
 export const issueCertificate = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const b = req.body ?? {}
-    if (!isObjectId(b.employeeId)) throw badRequest('employeeId is required')
+    const signature = takeSignature(req)
+    if (!isObjectId(b.employeeId)) { wipe(signature); throw badRequest('employeeId is required') }
 
-    const ctx = await createIssueContext(auth.id, parseIssueInput(b))
-    const { certificate, email } = await issueOne(ctx, b.employeeId)
+    let result: Awaited<ReturnType<typeof issueOne>>
+    try {
+        const input = parseIssueInput(b)
+        if (signature && !input.sendEmail) throw badRequest(SIGNED_NEEDS_EMAIL)
+        const ctx = await createIssueContext(auth.id, input)
+        ctx.signature = signature
+        result = await issueOne(ctx, b.employeeId)
+    } finally {
+        wipe(signature)
+    }
+    const { certificate, email } = result
 
     const emailFailed = email?.status === 'failed'
     res.status(201).json({
@@ -151,28 +183,38 @@ export const issueCertificate = async (req: Request, res: Response): Promise<voi
 export const bulkIssueCertificates = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const b = req.body ?? {}
+    // One signature for the whole batch, wiped when the batch is done.
+    const signature = takeSignature(req)
 
-    if (!Array.isArray(b.employeeIds) || b.employeeIds.length === 0) throw badRequest('employeeIds must be a non-empty array')
-    if (b.employeeIds.length > 50) throw badRequest('You can issue to at most 50 employees at once')
-    if (!b.employeeIds.every((id: unknown) => isObjectId(id))) throw badRequest('employeeIds contains an invalid id')
-    const ids: string[] = [...new Set<string>(b.employeeIds)]
-
-    const ctx = await createIssueContext(auth.id, parseIssueInput(b))
-
+    const ids: string[] = []
     const results: { employeeId: string; success: boolean; referenceNo?: string; certificateId?: string; email?: string; error?: string }[] = []
-    for (const employeeId of ids) {
-        try {
-            const { certificate, email } = await issueOne(ctx, employeeId)
-            results.push({
-                employeeId,
-                success: true,
-                referenceNo: certificate.referenceNo,
-                certificateId: String(certificate._id),
-                email: email?.status ?? 'not_sent',
-            })
-        } catch (error) {
-            results.push({ employeeId, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
+    try {
+        if (!Array.isArray(b.employeeIds) || b.employeeIds.length === 0) throw badRequest('employeeIds must be a non-empty array')
+        if (b.employeeIds.length > 50) throw badRequest('You can issue to at most 50 employees at once')
+        if (!b.employeeIds.every((id: unknown) => isObjectId(id))) throw badRequest('employeeIds contains an invalid id')
+        ids.push(...new Set<string>(b.employeeIds))
+
+        const input = parseIssueInput(b)
+        if (signature && !input.sendEmail) throw badRequest(SIGNED_NEEDS_EMAIL)
+        const ctx = await createIssueContext(auth.id, input)
+        ctx.signature = signature
+
+        for (const employeeId of ids) {
+            try {
+                const { certificate, email } = await issueOne(ctx, employeeId)
+                results.push({
+                    employeeId,
+                    success: true,
+                    referenceNo: certificate.referenceNo,
+                    certificateId: String(certificate._id),
+                    email: email?.status ?? 'not_sent',
+                })
+            } catch (error) {
+                results.push({ employeeId, success: false, error: error instanceof Error ? error.message : 'Unknown error' })
+            }
         }
+    } finally {
+        wipe(signature)
     }
 
     const issued = results.filter(r => r.success).length
@@ -288,15 +330,25 @@ export const downloadCertificatePdf = async (req: Request, res: Response): Promi
 /* Admin: resend / revoke                                              */
 /* ------------------------------------------------------------------ */
 
-// POST /api/certificates/:id/resend-email   (admin)
+// POST /api/certificates/:id/resend-email   (admin)   { signatureImage? }
+// Without a signature the resent copy shows "Digitally signed by ..." (if it was signed before) and no image.
+// With one, the resent copy carries the image (memory only, same rules as issuing).
 export const resendCertificateEmail = async (req: Request, res: Response): Promise<void> => {
-    const cert = await Certificate.findById(paramId(req))
-    if (!cert) throw notFound('Certificate not found')
-    if (cert.status === 'revoked') throw badRequest('A revoked certificate cannot be emailed')
+    const auth = getAuth(req)
+    const signature = takeSignature(req)
+    let outcome: Awaited<ReturnType<typeof sendCertificateEmail>>
+    try {
+        const cert = await Certificate.findById(paramId(req))
+        if (!cert) throw notFound('Certificate not found')
+        if (cert.status === 'revoked') throw badRequest('A revoked certificate cannot be emailed')
 
-    // Use the employee's current address if they have one, else the one saved at issue time.
-    const employee = await User.findById(cert.employeeId).select('email').lean()
-    const outcome = await sendCertificateEmail(cert, employee?.email || cert.recipient.email)
+        // Use the employee's current address if they have one, else the one saved at issue time.
+        const employee = await User.findById(cert.employeeId).select('email').lean()
+        outcome = await sendCertificateEmail(cert, employee?.email || cert.recipient.email, undefined,
+            signature ? { image: signature, signerId: auth.id } : undefined)
+    } finally {
+        wipe(signature)
+    }
 
     res.status(200).json({
         success: outcome.status === 'sent',

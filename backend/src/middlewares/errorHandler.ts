@@ -9,6 +9,12 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
         return
     }
 
+    // Body-parser errors: never logged (a parse error carries the raw request body, which can hold a signature image).
+    if (err?.type === 'entity.too.large') {
+        res.status(413).json({ success: false, message: 'The request is too large. A signature image must be at most 1 MB.' })
+        return
+    }
+
     if (err?.type === 'entity.parse.failed') {
         res.status(400).json({ success: false, message: 'Request body is not valid JSON' })
         return
@@ -35,6 +41,7 @@ export const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
         return
     }
 
-    console.error('Unhandled error:', err)
+    // Log what went wrong, never the error object itself: some errors carry the request body or other data.
+    console.error('Unhandled error:', err?.name ?? 'Error', err?.message ?? '', err?.stack ?? '')
     res.status(500).json({ success: false, message: 'Internal server error' })
 }

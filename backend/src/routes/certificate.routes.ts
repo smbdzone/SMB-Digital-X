@@ -1,7 +1,7 @@
 import { Router } from 'express'
 import {
     bulkIssueCertificates, downloadCertificatePdf, getCertificate, getMyCertificates, issueCertificate,
-    listCertificates, listTypes, previewCertificate, resendCertificateEmail, revokeCertificate,
+    listCertificates, listTypes, previewCertificate, previewCertificatePdf, resendCertificateEmail, revokeCertificate,
 } from '../controller/certificate.controller.js'
 import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '../controller/certificateTemplate.controller.js'
 import { isAllow, isVerified } from '../middlewares/isVerified.js'
@@ -24,6 +24,7 @@ router.delete('/templates/:id', adminOnly, deleteTemplate)
 
 // Admin: issue
 router.post('/preview', adminOnly, previewCertificate)
+router.post('/preview/pdf', adminOnly, previewCertificatePdf)
 router.post('/bulk', adminOnly, bulkIssueCertificates)
 router.post('/', adminOnly, issueCertificate)
 router.get('/', adminOnly, listCertificates)

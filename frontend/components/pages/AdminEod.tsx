@@ -20,10 +20,15 @@ import Pagination from '../ui/Pagination'
 import { StatusBadge, InfoBox, ReportSection, TaskList, SummaryCard, TextAreaField } from '@/components/ui/shared'
 import { errorMessage, formatDate } from '@/lib/utils'
 import { formatDayKey, reportDayKey, todayKey } from '@/lib/eodDate'
+import EodDeliverables, { CountsLine } from '@/components/deliverables/EodDeliverables'
 
 const PAGE_SIZE = 20
 const SEARCH_LIMIT = 200 // backend maximum; used while searching so the search covers the whole day
 const REVIEW_NOTE_MAX = 1000
+
+// "Mark as reviewed" is switched off: the daily deliverables (plan approval + outcomes) replace it.
+// The review fields stay in the data, so old reports still show who reviewed them and when.
+const REVIEW_ENABLED = false
 
 const employeeOf = (report: EODReport) =>
     typeof report.employeeId === 'object' && report.employeeId !== null ? report.employeeId : null
@@ -196,7 +201,7 @@ const EODManagement = () => {
             <div className="py-4 lg:py-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h4 className="text-md sm:text-xl font-bold font-heading">EOD Reports</h4>
-                    <p className="mt-1 text-sm text-charcoal/45">Review employee end of day reports.</p>
+                    <p className="mt-1 text-sm text-charcoal/45">Employee end of day reports.</p>
                 </div>
                 <div className="flex items-center gap-2">
                     <FiCalendar className="size-4 text-charcoal/40" />
@@ -206,7 +211,7 @@ const EODManagement = () => {
 
             <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-4">
                 <SummaryCard title="Total Reports" value={totalReports} />
-                <SummaryCard title="Pending Review" value={counts.pending} />
+                <SummaryCard title={REVIEW_ENABLED ? 'Pending Review' : 'Submitted'} value={counts.pending} />
                 <SummaryCard title="Reviewed" value={counts.reviewed} />
                 <SummaryCard title="Not Submitted" value={missing?.missingCount ?? '-'} subtitle={missing ? `of ${missing.totalEmployees} active employees` : undefined} />
             </div>
@@ -246,7 +251,7 @@ const EODManagement = () => {
                 </div>
                 <select value={status} onChange={(e) => handleStatusChange(e.target.value as 'all' | EODStatus)} className="h-11 rounded-xl border border-charcoal/10 bg-white px-3 text-sm text-charcoal outline-none transition focus:border-blue-500">
                     <option value="all">All Status</option>
-                    <option value="Submitted">Pending Review</option>
+                    <option value="Submitted">{REVIEW_ENABLED ? 'Pending Review' : 'Submitted'}</option>
                     <option value="Reviewed">Reviewed</option>
                 </select>
             </div>
@@ -326,8 +331,17 @@ const EODManagement = () => {
                             <InfoBox title="Overall Progress" value={`${selectedReport.overallProgress}%`} />
                         </div>
                         <ReportSection title="Today's Summary" content={selectedReport.summary} />
-                        <TaskList title="Completed Tasks" tasks={selectedReport.completedTasks} type="completed" />
-                        <TaskList title="In Progress" tasks={selectedReport.inProgressTasks} type="progress" />
+                        {selectedReport.deliverableStats ? (
+                            <>
+                                <CountsLine stats={selectedReport.deliverableStats} />
+                                <EodDeliverables date={reportDayKey(selectedReport)} employeeId={employeeIdOf(selectedReport)} />
+                            </>
+                        ) : (
+                            <>
+                                <TaskList title="Completed Tasks" tasks={selectedReport.completedTasks} type="completed" />
+                                <TaskList title="Half completed" tasks={selectedReport.inProgressTasks} type="progress" />
+                            </>
+                        )}
                         {selectedReport.blockers && <ReportSection title="Blockers / Issues" content={selectedReport.blockers} />}
                         {selectedReport.tomorrowPlan && <ReportSection title="Tomorrow's Plan" content={selectedReport.tomorrowPlan} />}
                         {selectedReport.status === 'Reviewed' && (
@@ -339,7 +353,7 @@ const EODManagement = () => {
                             </div>
                         )}
 
-                        {selectedReport.status === 'Submitted' && !isOwnReport && (
+                        {REVIEW_ENABLED && selectedReport.status === 'Submitted' && !isOwnReport && (
                             <TextAreaField
                                 label="Review note (optional)"
                                 name="reviewNote"
@@ -349,13 +363,13 @@ const EODManagement = () => {
                                 rows={3}
                             />
                         )}
-                        {selectedReport.status === 'Submitted' && isOwnReport && (
+                        {REVIEW_ENABLED && selectedReport.status === 'Submitted' && isOwnReport && (
                             <p className="rounded-xl bg-charcoal/[0.03] p-3 text-xs text-charcoal/50">You cannot review your own report.</p>
                         )}
 
                         <div className="flex justify-end gap-3 border-t border-charcoal/5 pt-5">
                             <button onClick={closeReport} className="rounded-xl border border-charcoal/10 px-4 py-2.5 text-sm font-semibold text-charcoal transition hover:bg-charcoal/5">Close</button>
-                            {selectedReport.status === 'Submitted' && !isOwnReport && (
+                            {REVIEW_ENABLED && selectedReport.status === 'Submitted' && !isOwnReport && (
                                 <ButtonEmerald onClick={handleReview} disabled={reviewing}>{reviewing ? 'Saving...' : 'Mark as Reviewed'}</ButtonEmerald>
                             )}
                         </div>

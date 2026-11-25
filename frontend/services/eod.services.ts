@@ -1,5 +1,6 @@
 import { apiClient, ApiEnvelope } from "@/lib/apiClient";
 import { buildQuery } from "@/lib/utils";
+import type { OutcomeInput } from "@/services/deliverable.services";
 
 
 // ========================================
@@ -53,6 +54,10 @@ export interface EODReport {
 
     overallProgress: number;
 
+    // Present when the day had deliverables: then overallProgress was calculated from them
+    // ((completed + 0.5 x half completed) / planned). Old reports have no deliverableStats.
+    deliverableStats?: { planned: number; completed: number; inProgress: number; notStarted: number } | null;
+
     status: EODStatus;
 
     reviewedBy?: EODEmployee | null;
@@ -96,7 +101,13 @@ export interface SubmitEODPayload {
 
     tomorrowPlan?: string;
 
-    overallProgress: number;
+    // Only used on a day without deliverables. With deliverables the backend calculates it.
+    overallProgress?: number;
+
+    // A day with deliverables: what happened to each item, and which unfinished ones carry to tomorrow.
+    outcomes?: OutcomeInput[];
+
+    carryOver?: string[];
 }
 
 export const submitEOD = (

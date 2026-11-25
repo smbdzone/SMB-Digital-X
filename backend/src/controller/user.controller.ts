@@ -244,10 +244,12 @@ export const getUserController = async (req: Request, res: Response): Promise<vo
 
 export const getAllUserController = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.user;
+        const { id, role } = req.user;
+        // Employees use this list for chat only: they get names and contact fields, never salary or other HR data.
+        const fields = role === 'admin' ? "-password" : "_id name email position";
         const Users = await User.find({
             _id: { $ne: id }
-        }).select("-password").sort({ createdAt: -1 });
+        }).select(fields).sort({ createdAt: -1 });
 
         res.status(200).json({
             success: true,

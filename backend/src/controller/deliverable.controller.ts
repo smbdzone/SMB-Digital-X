@@ -1,5 +1,7 @@
 import { Request, Response } from "express";
+import { Types } from "mongoose";
 import Deliverable from "../model/deliverable.model.js";
+import { asStatsRange, daySummary, statsFor, teamStats } from "../services/deliverableStats.service.js";
 import { asObjectId, badRequest, conflict, forbidden, getAuth, notFound, paramId, queryString } from "../utils/http.js";
 import {
     addFromTasks, applyApproverEdit, approvalQueue, approvePlans, asIdArray, asPlanDay, asPlanRefs, assertNotOwnPlan,
@@ -211,4 +213,35 @@ export const getTeamDay = async (req: Request, res: Response): Promise<void> => 
     const date = queryString(req.query.date) ? asDayKey(queryString(req.query.date)) : dayKey();
     const companyId = queryString(req.query.companyId) ? String(asObjectId(queryString(req.query.companyId), "companyId")) : undefined;
     res.status(200).json({ success: true, message: "Team day", data: { date, employees: await teamDay(date, companyId) } });
+};
+
+/* ------------------------------------------------------------------ */
+/* Performance                                                         */
+/* ------------------------------------------------------------------ */
+
+// GET /api/deliverables/stats/me?from=&to=   (default: month to date)
+export const getMyStats = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    const range = asStatsRange(queryString(req.query.from), queryString(req.query.to));
+    const stats = await statsFor([new Types.ObjectId(viewer.id)], range);
+    res.status(200).json({ success: true, message: "Your performance", data: { ...range, stats: stats.get(viewer.id) } });
+};
+
+// GET /api/deliverables/stats?from=&to=&employeeId=&companyId=   (approvers)
+export const getTeamStats = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    requireApprover(viewer);
+    const q = req.query;
+    const range = asStatsRange(queryString(q.from), queryString(q.to));
+    const employeeId = queryString(q.employeeId) ? String(asObjectId(queryString(q.employeeId), "employeeId")) : undefined;
+    const companyId = queryString(q.companyId) ? String(asObjectId(queryString(q.companyId), "companyId")) : undefined;
+    res.status(200).json({ success: true, message: "Team performance", data: { ...range, employees: await teamStats(range, { employeeId, companyId }) } });
+};
+
+// GET /api/deliverables/summary?date=   (approvers; dashboard card)
+export const getDaySummary = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    requireApprover(viewer);
+    const date = queryString(req.query.date) ? asDayKey(queryString(req.query.date)) : dayKey();
+    res.status(200).json({ success: true, message: "Today's plans", data: await daySummary(date) });
 };

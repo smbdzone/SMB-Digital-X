@@ -1,4 +1,5 @@
 import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { AppError } from '../utils/http.js'
 
@@ -312,8 +313,8 @@ const LETTERHEADS: Record<string, Letterhead> = {
 export const getLetterhead = (companyCode?: string): Letterhead | undefined =>
     companyCode ? LETTERHEADS[companyCode.toLowerCase()] : undefined
 
-export const letterheadAsset = (lh: Letterhead, file: string): string => `${ASSETS_DIR}letterheads/${lh.code}/${file}`
-export const fontAsset = (font: FontName): string => `${ASSETS_DIR}${FONT_FILES[font]}`
+export const letterheadAsset = (lh: Letterhead, file: string): string => join(ASSETS_DIR, 'letterheads', lh.code, file)
+export const fontAsset = (font: FontName): string => join(ASSETS_DIR, FONT_FILES[font])
 
 /** Every file a letterhead needs. */
 export const letterheadFiles = (lh: Letterhead): string[] => {

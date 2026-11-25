@@ -320,7 +320,7 @@ const Companies = () => {
                         <div className="grid gap-4 sm:grid-cols-3">
                             <Input label="Name" value={form.signatoryName} handleChange={text('signatoryName')} />
                             <Input label="Title" value={form.signatoryTitle} handleChange={text('signatoryTitle')} />
-                            <Input label="Signature text" value={form.signature} handleChange={text('signature')} />
+                            <Input label="Signature text (salary slips)" value={form.signature} handleChange={text('signature')} helperText="Printed on salary slips only. Letters and certificates are signed with the signature image when issuing." />
                         </div>
                     </Section>
 

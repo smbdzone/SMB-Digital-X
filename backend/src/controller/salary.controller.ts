@@ -8,7 +8,7 @@ import {
 import { round2 } from "../utils/money.js";
 import { resolveLogoUrl } from "../services/company.service.js";
 import {
-    SalaryChanges, bulkPaySalaries, currentMonth, generateMonthlySalaries, sendSlipEmail, updateSalaryRecord,
+    SalaryChanges, bulkPaySalaries, currentMonth, generateMonthlySalaries, getSlipPdf, sendSlipEmail, updateSalaryRecord,
 } from "../services/salary.service.js";
 
 /* ------------------------------------------------------------------ */
@@ -131,6 +131,18 @@ export const getSalary = async (req: Request, res: Response): Promise<void> => {
     }
 
     res.status(200).json({ success: true, data: toDTO(salary, { maskPayment: !isAdmin(auth) }) });
+};
+
+// GET /api/salary/:id/pdf[?inline=true] - admin: any record (unpaid = DRAFT); employee: own paid slips only
+export const downloadSalarySlipPdf = async (req: Request, res: Response): Promise<void> => {
+    const auth = getAuth(req);
+    const { pdf, fileName } = await getSlipPdf(paramId(req), { id: auth.id, admin: isAdmin(auth) });
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Length', String(pdf.length));
+    res.setHeader('Cache-Control', 'private, no-store');
+    res.setHeader('Content-Disposition', `${req.query.inline === 'true' ? 'inline' : 'attachment'}; filename="${fileName}"`);
+    res.status(200).end(pdf);
 };
 
 /* ------------------------------------------------------------------ */

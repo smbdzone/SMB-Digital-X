@@ -54,6 +54,8 @@ export interface User {
     position?: string
     status?: "active" | "inactive";
     companyId?: string;
+    // Can approve daily deliverable plans (always true for the admin). Set by the admin only.
+    canApproveDeliverables?: boolean;
     salary?: { amount?: number; currency?: string; effectiveFrom?: string; allowances?: SalaryAllowance[] };
     [key: string]: unknown;
 }

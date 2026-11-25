@@ -38,6 +38,8 @@ export interface UpdateEmployeePayload {
     password?: string;
     position?: string;
     status?: "active" | "inactive";
+    // Admin only: lets this employee approve other people's daily plans
+    canApproveDeliverables?: boolean;
     salaryAmount?: number;
     salaryCurrency?: string;
     salaryAllowances?: SalaryAllowance[];

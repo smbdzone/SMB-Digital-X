@@ -30,11 +30,12 @@ interface EmployeeForm {
   companyId: string
   position: string
   status: 'active' | 'inactive'
+  canApproveDeliverables: boolean
 }
 
 const emptyForm: EmployeeForm = {
   name: '', email: '', password: '', salaryAmount: '', salaryCurrency: 'AED', allowances: [],
-  companyId: '', position: '', status: 'active',
+  companyId: '', position: '', status: 'active', canApproveDeliverables: false,
 }
 
 const emptyBank: Required<BankDetails> = { method: '', bankName: '', holderName: '', accountNumber: '', iban: '' }
@@ -50,6 +51,7 @@ const Employees = () => {
 
   const [modalOpen, setModalOpen] = useState<boolean>(false)
   const [editEmployeeId, setEditEmployeeId] = useState<string>('')
+  const editingAdmin = employees.find(e => e._id === editEmployeeId)?.role === 'admin'
   const [form, setForm] = useState<EmployeeForm>(emptyForm)
   const [bank, setBank] = useState<Required<BankDetails>>(emptyBank)
 
@@ -100,6 +102,7 @@ const Employees = () => {
         companyId: employee.companyId ? String(employee.companyId) : '',
         position: employee.position ?? '',
         status: (employee.status as 'active' | 'inactive') ?? 'active',
+        canApproveDeliverables: employee.canApproveDeliverables === true,
       })
       setBank(emptyBank) // bank details are hidden by the API; typing here replaces only the fields you fill in
     } else {
@@ -149,7 +152,12 @@ const Employees = () => {
     setLoading(true)
     try {
       if (editEmployeeId) {
-        await updateEmployee(token, editEmployeeId, { ...payload, status: form.status })
+        await updateEmployee(token, editEmployeeId, {
+          ...payload,
+          status: form.status,
+          // The admin approves anyway; the flag is for employees (e.g. the team lead)
+          ...(editingAdmin ? {} : { canApproveDeliverables: form.canApproveDeliverables }),
+        })
         toast.showSuccess('Employee updated successfully')
       } else {
         await registerEmployee(token, { ...payload, password: form.password })
@@ -218,7 +226,12 @@ const Employees = () => {
             ) : (
               employees.map(emp => (
                 <tr key={emp._id}>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">{emp.name}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                    {emp.name}
+                    {emp.role !== 'admin' && emp.canApproveDeliverables && (
+                      <span className="ml-2 rounded-full bg-violet-50 px-2 py-0.5 text-[11px] font-semibold text-violet-700">Plan approver</span>
+                    )}
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{emp.email}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{emp.position}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -295,6 +308,22 @@ const Employees = () => {
               onChange={handleChangeForm}
               options={[{ value: 'active', label: 'Active' }, { value: 'inactive', label: 'Inactive' }]}
             />
+          )}
+          {editEmployeeId && !editingAdmin && (
+            <label className='flex cursor-pointer items-start gap-3 rounded-xl border border-charcoal/10 p-4 sm:col-span-2'>
+              <input
+                type='checkbox'
+                checked={form.canApproveDeliverables}
+                onChange={e => setForm(p => ({ ...p, canApproveDeliverables: e.target.checked }))}
+                className='mt-0.5 size-5 shrink-0 accent-blue-600'
+              />
+              <span>
+                <span className='block text-sm font-medium text-charcoal'>Can approve daily plans</span>
+                <span className='mt-0.5 block text-xs text-charcoal/50'>
+                  For a team lead: sees the approval queue and the team day, and can edit and approve other people&apos;s plans. Their own plan is still approved by you.
+                </span>
+              </span>
+            </label>
           )}
         </div>
 

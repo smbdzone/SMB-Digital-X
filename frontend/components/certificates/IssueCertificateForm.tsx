@@ -9,6 +9,7 @@ import ModalBox from '@/components/ui/ModalBox'
 import SelectField from '@/components/ui/SelectField'
 import { StatusBadge } from '@/components/ui/shared'
 import CertificateDocument from './CertificateDocument'
+import SignaturePicker, { PickedSignature } from './SignaturePicker'
 import WordingFields from './WordingFields'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
@@ -46,9 +47,11 @@ interface BulkOutcome {
 }
 
 const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
-    const { token } = useAuth()
+    const { token, role } = useAuth()
     const toast = useToast()
     const { companies } = useCompanies()
+    // Only the owner (the admin) can sign.
+    const canSign = role === 'admin'
 
     // What to issue
     const [companyId, setCompanyId] = useState('')
@@ -57,6 +60,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     const [typeName, setTypeName] = useState('')
     const [kind, setKind] = useState<CertificateKind>('letter')
     const [title, setTitle] = useState('')
+    const [subject, setSubject] = useState('')
     const [body, setBody] = useState('')
     const [issueDate, setIssueDate] = useState('')
     const [values, setValues] = useState<Record<string, string>>({})
@@ -64,6 +68,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     const [signName, setSignName] = useState('')
     const [signTitle, setSignTitle] = useState('')
     const [sendEmail, setSendEmail] = useState(true)
+    // The signature image for this issue only. Memory (React state) only; cleared after issuing or on Remove.
+    const [signature, setSignature] = useState<PickedSignature | null>(null)
     const [saveTemplate, setSaveTemplate] = useState(true)
 
     // Who gets it
@@ -155,7 +161,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
 
     const companyOptions = companies.map(c => ({ value: c._id, label: c.name }))
 
-    const placeholders = useMemo(() => findPlaceholders(title, body), [title, body])
+    const placeholders = useMemo(() => findPlaceholders(title, subject, body), [title, subject, body])
 
     // Values the admin has to type in: the ones in the text that the system cannot fill, plus any the backend asked for.
     const neededKeys = useMemo(
@@ -187,6 +193,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
             setTypeName('')
             setKind('letter')
             setTitle('')
+            setSubject('')
             setBody('')
             return
         }
@@ -196,6 +203,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         setTypeName(t.typeLabel)
         setKind(t.kind)
         setTitle(t.title)
+        setSubject(t.subject ?? '')
         setBody(t.body)
         if (t.companyId) setCompanyId(t.companyId)
     }
@@ -222,13 +230,15 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         if (!title.trim()) return 'Add a title.'
         if (!body.trim()) return 'Add the text of the document.'
         if (selected.length === 0) return 'Choose at least one employee.'
+        if (signature && !sendEmail) return 'A signed document has to be emailed: the email is the only copy with the signature. Turn on "Email the PDF" or remove the signature.'
 
         const missing = neededKeys.filter(k => !values[k]?.trim())
         if (missing.length > 0) return `Fill in: ${missing.map(humanizeVariable).join(', ')}.`
         return null
     }
 
-    const buildPayload = (): IssuePayload => {
+    // withSignature: only the PDF preview, issue and bulk issue get the image, never the text preview.
+    const buildPayload = (withSignature = false): IssuePayload => {
         const variables: Record<string, string> = {}
         for (const key of [...neededKeys, ...(showJoiningDate ? ['joiningDate'] : [])]) {
             const value = values[key]?.trim()
@@ -242,6 +252,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         return {
             type: typeName.trim(),
             title: title.trim(),
+            subject: kind === 'letter' ? subject.trim() : '',
             body: body.trim(),
             kind,
             companyId: companyId || undefined,
@@ -250,6 +261,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
             signatory: Object.keys(signatory).length ? signatory : undefined,
             sendEmail,
             saveTemplate,
+            signatureImage: withSignature && canSign && signature ? signature.base64 : undefined,
         }
     }
 
@@ -282,8 +294,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
             const payload = { employeeId: selected[0], ...buildPayload() }
             const [res, pdf] = await Promise.all([
                 previewCertificate(token, payload),
-                // The PDF is the real design. If it fails, the plain text preview is shown instead.
-                previewCertificatePdf(token, payload).catch(() => null),
+                // The PDF is the real design (with the signature, if one was chosen). If it fails, the plain text preview is shown.
+                previewCertificatePdf(token, { employeeId: selected[0], ...buildPayload(true) }).catch(() => null),
             ])
             setPreviewPdfUrl(pdf ? URL.createObjectURL(pdf) : null)
             if (res.data) setPreview(res.data)
@@ -306,7 +318,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         closePreview()
         try {
             if (selected.length === 1) {
-                const res = await issueCertificate(token, { employeeId: selected[0], ...buildPayload() })
+                const res = await issueCertificate(token, { employeeId: selected[0], ...buildPayload(true) })
+                setSignature(null)   // used once; never kept
                 if (res.email?.status === 'failed') {
                     toast.showWarning(res.message || 'Issued, but the email could not be sent. You can resend it.', 6000)
                 } else {
@@ -314,7 +327,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                 }
                 onIssued()
             } else {
-                const res = await bulkIssueCertificates(token, { employeeIds: selected, ...buildPayload() })
+                const res = await bulkIssueCertificates(token, { employeeIds: selected, ...buildPayload(true) })
+                setSignature(null)   // one signature for the whole batch, then discarded
                 const rows = res.data ?? []
                 rememberMissing(rows.filter(r => !r.success && r.error).map(r => r.error as string))
                 setOutcome({
@@ -412,7 +426,14 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                     {typeSel && (
                         <section className={card}>
                             <h5 className={cardTitle}>Wording</h5>
-                            <WordingFields title={title} body={body} onTitleChange={setTitle} onBodyChange={setBody} />
+                            <WordingFields
+                                title={title}
+                                body={body}
+                                onTitleChange={setTitle}
+                                onBodyChange={setBody}
+                                subject={subject}
+                                onSubjectChange={kind === 'letter' ? setSubject : undefined}
+                            />
                         </section>
                     )}
 
@@ -455,6 +476,24 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                             <Input label="Job title" value={signTitle} handleChange={e => setSignTitle(e.target.value)} maxLength={100} />
                         </div>
                     </details>
+
+                    {canSign && (
+                        <section className={card}>
+                            <h5 className={cardTitle}>Sign this document</h5>
+                            <SignaturePicker
+                                value={signature}
+                                onChange={setSignature}
+                                disabled={busy}
+                                note={
+                                    <>
+                                        Only the emailed PDF carries the signature{selected.length > 1 ? ' (one signature for all selected employees)' : ''}.
+                                        Copies opened in the app show &quot;Digitally signed by ...&quot; instead.
+                                        {!sendEmail && signature && <span className="block text-red-600">Turn on &quot;Email the PDF&quot; to issue a signed document.</span>}
+                                    </>
+                                }
+                            />
+                        </section>
+                    )}
                 </div>
 
                 {/* Right: recipients and actions */}
@@ -612,6 +651,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                             <CertificateDocument
                                 kind={preview.kind}
                                 title={preview.title}
+                                subject={preview.subject}
                                 body={preview.body}
                                 companyName={preview.companyName}
                                 issueDate={preview.issueDate}

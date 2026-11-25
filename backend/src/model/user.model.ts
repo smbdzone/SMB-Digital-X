@@ -39,6 +39,9 @@ export interface IUser extends Document {
     // Hidden from queries by default; select with `+bankDetails`
     bankDetails?: IBankDetails;
     position?: string;
+    // Set by the admin: this employee (e.g. the team lead) may approve other people's daily deliverables.
+    // Admins can always approve. Nobody can approve their own deliverables.
+    canApproveDeliverables: boolean;
     // Password reset by 6-digit code. The code itself is never stored, only a keyed hash of it.
     passwordResetCodeHash?: string;
     passwordResetExpires?: Date;
@@ -125,6 +128,10 @@ const userSchema = new mongoose.Schema<IUser>({
     position: {
         type: String,
         default: ''
+    },
+    canApproveDeliverables: {
+        type: Boolean,
+        default: false,
     },
     passwordResetCodeHash: { type: String, select: false },
     passwordResetExpires: { type: Date, select: false },

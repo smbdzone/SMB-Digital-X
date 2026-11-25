@@ -10,10 +10,11 @@ const route = express.Router()
 // (It used to be public: anyone could register themselves with any salary.)
 // To create your very first admin, insert it directly in MongoDB or use a one-off seed script.
 route.post('/register', isVerified, isAllow(['admin']), registerController)
-route.post('/login', loginController)
 
 // Forgot password (public). Limits are counted per email address.
 const FIFTEEN_MIN = 15 * 60 * 1000
+// Login: same limiter and settings as forgot-password (5 attempts per email per 15 minutes).
+route.post('/login', rateLimit({ windowMs: FIFTEEN_MIN, max: 5, message: 'Too many login attempts. Please try again in a few minutes.' }), loginController)
 route.post('/forgot-password', rateLimit({ windowMs: FIFTEEN_MIN, max: 5, message: 'Too many reset requests. Please try again in a few minutes.' }), forgotPasswordController)
 route.post('/verify-reset-code', rateLimit({ windowMs: FIFTEEN_MIN, max: 15, message: 'Too many attempts. Please try again in a few minutes.' }), verifyResetCodeController)
 route.post('/reset-password', rateLimit({ windowMs: FIFTEEN_MIN, max: 15, message: 'Too many attempts. Please try again in a few minutes.' }), resetPasswordController)

@@ -138,8 +138,14 @@ export const populateItems = <T extends { populate: (...args: any[]) => T }>(que
         .populate("editedBy", "name")
         .populate("createdBy", "name");
 
-export const dayItems = (employeeId: string, date: string) =>
-    populateItems(Deliverable.find({ employeeId, dateKey: date }).sort({ order: 1, createdAt: 1 })).lean();
+// One employee's day in display order. `carriedTo` = the day an unfinished item was carried over to.
+export const dayItems = async (employeeId: string, date: string) => {
+    const items = await populateItems(Deliverable.find({ employeeId, dateKey: date }).sort({ order: 1, createdAt: 1 })).lean();
+    if (items.length === 0) return [];
+    const copies = await Deliverable.find({ carriedFromId: { $in: items.map(i => i._id) } }).select("carriedFromId dateKey").lean();
+    const carriedTo = new Map(copies.map(c => [String(c.carriedFromId), c.dateKey]));
+    return items.map(i => ({ ...i, carriedTo: carriedTo.get(String(i._id)) ?? null }));
+};
 
 export type PlanState = "empty" | "draft" | "pending" | "approved";
 

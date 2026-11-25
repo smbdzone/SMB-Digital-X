@@ -56,11 +56,26 @@ const eodSchema = new mongoose.Schema(
             trim: true
         },
 
+        // Calculated from the day's deliverables when there are any (see services/eodDay.service.ts):
+        // completed = 1, half completed = 0.5, out of every item of the day. Older reports kept the typed value.
         overallProgress: {
             type: Number,
             min: 0,
             max: 100,
             default: 0
+        },
+
+        // Snapshot of the day's deliverables when the report was saved. Missing on reports from before
+        // deliverables existed; those show completedTasks / inProgressTasks instead.
+        deliverableStats: {
+            type: {
+                _id: false,
+                planned: Number,
+                completed: Number,
+                inProgress: Number,
+                notStarted: Number,
+            },
+            default: undefined
         },
 
         status: {

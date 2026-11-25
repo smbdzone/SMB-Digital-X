@@ -22,3 +22,10 @@ export const asDayKey = (value: unknown, field = 'date'): string => {
     }
     return value
 }
+
+// "2026-11-30" + 1 -> "2026-12-01"
+export const shiftDayKey = (key: string, days: number): string => {
+    const d = keyToDate(key)
+    d.setUTCDate(d.getUTCDate() + days)
+    return d.toISOString().slice(0, 10)
+}

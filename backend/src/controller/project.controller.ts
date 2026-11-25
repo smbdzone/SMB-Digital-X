@@ -1,5 +1,15 @@
 import { Request, Response } from 'express'
+import { Types } from 'mongoose'
 import Project from '../model/project.model.js'
+import Task from '../model/task.model.js'
+import { getAuth, isAdmin, isObjectId } from '../utils/http.js'
+
+// What an employee may see of a project they work on: no budget, no team contact details.
+const EMPLOYEE_PROJECT_FIELDS = 'name clientName description category startDate deadline status'
+
+// The projects an employee has at least one task in.
+const employeeProjectIds = (employeeId: string) =>
+    Task.distinct('projectId', { assignedTo: new Types.ObjectId(employeeId) })
 
 // Create Project
 export const createProjectController = async (
@@ -61,9 +71,14 @@ export const getProjectsController = async (
     res: Response
 ): Promise<void> => {
     try {
-        const projects = await Project.find()
-            .populate('employees', 'name email role')
-            .sort({ createdAt: -1 })
+        const auth = getAuth(req)
+        const projects = isAdmin(auth)
+            ? await Project.find()
+                .populate('employees', 'name email role')
+                .sort({ createdAt: -1 })
+            : await Project.find({ _id: { $in: await employeeProjectIds(auth.id) } })
+                .select(EMPLOYEE_PROJECT_FIELDS)
+                .sort({ createdAt: -1 })
 
         res.status(200).json({
             success: true,
@@ -87,9 +102,18 @@ export const getProjectController = async (
 ): Promise<void> => {
     try {
         const { id } = req.params
+        const auth = getAuth(req)
 
-        const project = await Project.findById(id)
-            .populate('employees', 'name email role')
+        if (!isObjectId(id)) {
+            res.status(400).json({ success: false, message: 'Invalid project id' })
+            return
+        }
+        // An employee gets the same 404 for a project they have no task in as for one that does not exist.
+        const visible = isAdmin(auth) || (await employeeProjectIds(auth.id)).some(p => String(p) === id)
+
+        const project = !visible ? null : isAdmin(auth)
+            ? await Project.findById(id).populate('employees', 'name email role')
+            : await Project.findById(id).select(EMPLOYEE_PROJECT_FIELDS)
 
         if (!project) {
             res.status(404).json({

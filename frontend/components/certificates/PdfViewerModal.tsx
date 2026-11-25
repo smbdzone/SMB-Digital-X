@@ -12,6 +12,10 @@ export interface PdfTarget {
     _id: string
     referenceNo: string
     title: string
+    /** Download file name. Defaults to "<referenceNo>.pdf". */
+    fileName?: string
+    /** How to fetch the PDF. Defaults to the certificate PDF endpoint. Pass a module-level function (stable reference). */
+    load?: (token: string, id: string) => Promise<Blob>
 }
 
 interface PdfResult {
@@ -23,11 +27,12 @@ interface PdfResult {
 const actionClass =
     'inline-flex h-11 items-center gap-2 rounded-xl border border-charcoal/10 bg-white px-4 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03]'
 
-/** Shows a certificate PDF inside the page. The file is fetched with the login token. */
+/** Shows a PDF (certificate, letter, salary slip) inside the page. The file is fetched with the login token. */
 const PdfViewerModal = ({ target, onClose }: { target: PdfTarget | null; onClose: () => void }) => {
     const { token } = useAuth()
     const [result, setResult] = useState<PdfResult | null>(null)
     const id = target?._id
+    const load = target?.load ?? getCertificatePdf
 
     useEffect(() => {
         if (!id || !token) return
@@ -35,7 +40,7 @@ const PdfViewerModal = ({ target, onClose }: { target: PdfTarget | null; onClose
         let cancelled = false
         let objectUrl: string | null = null
 
-        getCertificatePdf(token, id)
+        load(token, id)
             .then(blob => {
                 objectUrl = URL.createObjectURL(blob)
                 if (cancelled) {
@@ -52,11 +57,11 @@ const PdfViewerModal = ({ target, onClose }: { target: PdfTarget | null; onClose
             cancelled = true
             if (objectUrl) URL.revokeObjectURL(objectUrl)
         }
-    }, [id, token])
+    }, [id, token, load])
 
     const current = result && result.id === id ? result : null
     const loading = !!id && !current
-    const fileName = `${target?.referenceNo ?? 'certificate'}.pdf`
+    const fileName = target?.fileName ?? `${target?.referenceNo ?? 'certificate'}.pdf`
 
     return (
         <ModalBox
@@ -87,7 +92,7 @@ const PdfViewerModal = ({ target, onClose }: { target: PdfTarget | null; onClose
             {current?.url && (
                 <iframe
                     src={current.url}
-                    title={target?.title ?? 'Certificate PDF'}
+                    title={target?.title ?? 'PDF'}
                     className="h-[60vh] w-full rounded-lg border border-charcoal/10"
                 />
             )}

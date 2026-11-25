@@ -1,9 +1,10 @@
 'use client';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { FiCheckCircle, FiEdit, FiEye, FiMail, FiPlay } from 'react-icons/fi';
+import { FiCheckCircle, FiEdit, FiEye, FiFileText, FiMail, FiPlay } from 'react-icons/fi';
 
 import ModalBox from '../ui/ModalBox';
+import PdfViewerModal from '../certificates/PdfViewerModal';
 import ButtonEmerald from '../ui/ButtonEmerald';
 import Input from '../ui/Input';
 import SelectField from '../ui/SelectField';
@@ -25,6 +26,7 @@ import {
     salaryCompanyLogo,
     salaryCompanyName,
     salaryEmployee,
+    salarySlipPdfTarget,
     updateSalary,
 } from '@/services/salary.services';
 import { useAuth } from '@/context/AuthContext';
@@ -87,6 +89,7 @@ const SalaryManagement = () => {
     const [busyId, setBusyId] = useState<string | null>(null);
 
     const [viewSalary, setViewSalary] = useState<ISalary | null>(null);
+    const [pdfSalary, setPdfSalary] = useState<ISalary | null>(null);
     const [editTarget, setEditTarget] = useState<ISalary | null>(null);
     const [editForm, setEditForm] = useState<EditForm | null>(null);
     const [payTarget, setPayTarget] = useState<ISalary | null>(null);
@@ -399,6 +402,7 @@ const SalaryManagement = () => {
                                         <td className="whitespace-nowrap px-5 py-4">
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => setViewSalary(salary)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title="View"><FiEye className="size-4" /></button>
+                                                <button onClick={() => setPdfSalary(salary)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title={salary.status === 'paid' ? 'Slip PDF' : 'Slip PDF (draft)'} aria-label="Slip PDF"><FiFileText className="size-4" /></button>
                                                 <button onClick={() => openEdit(salary)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title={salary.status === 'paid' ? 'Edit notes' : 'Edit'}><FiEdit className="size-4" /></button>
                                                 {salary.status === 'pending' && (
                                                     <button onClick={() => openPay(salary)} disabled={rowBusy} className="rounded-lg p-2 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-40" title="Mark as paid"><FiCheckCircle className="size-4" /></button>
@@ -416,6 +420,12 @@ const SalaryManagement = () => {
                 </table>
             </div>
             {pagination && <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} onChange={setPage} disabled={loading} />}
+
+            {/* Slip PDF (unpaid records come back watermarked DRAFT) */}
+            <PdfViewerModal
+                target={pdfSalary ? salarySlipPdfTarget(pdfSalary, salaryEmployee(pdfSalary)?.name) : null}
+                onClose={() => setPdfSalary(null)}
+            />
 
             {/* View */}
             <ModalBox open={!!viewSalary} onClose={() => setViewSalary(null)} size="2xl" title="Salary details">

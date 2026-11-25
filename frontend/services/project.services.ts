@@ -23,6 +23,8 @@ export interface Project {
     budget: number;
     status: ProjectStatus;
     employees?: ProjectEmployee[];
+    // Employee responses only: whether they are a member of the project (admins get `employees`)
+    isMember?: boolean;
     category:string
     createdAt: string;
     updatedAt: string;

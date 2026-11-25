@@ -1,7 +1,7 @@
 import express from "express";
 import {
-    addTasksToDay, carryOverToDay, createDeliverable, deleteDeliverable, getAccess, getLinkableProjects,
-    getMyDay, reorderMyDay, submitMyDay, updateDeliverable,
+    addTasksToDay, approve, carryOverToDay, createDeliverable, deleteDeliverable, getAccess, getApprovalQueue,
+    getEmployeeDay, getLinkableProjects, getMyDay, getTeamDay, reorderMyDay, submitMyDay, updateDeliverable,
 } from "../controller/deliverable.controller.js";
 import { isVerified } from "../middlewares/isVerified.js";
 
@@ -21,6 +21,13 @@ router.post("/from-tasks", addTasksToDay);
 router.post("/carry-over", carryOverToDay);
 router.post("/submit", submitMyDay);
 router.post("/", createDeliverable);
+
+// Approvers (admin or canApproveDeliverables; checked in the controller)
+router.get("/approvals", getApprovalQueue);
+router.post("/approve", approve);
+router.get("/team", getTeamDay);
+// Self, or approver
+router.get("/day", getEmployeeDay);
 
 // Owner (or approver) - checked inside the controller. Keep below the fixed paths.
 router.patch("/:id", updateDeliverable);

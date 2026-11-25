@@ -1,9 +1,11 @@
 import { Request, Response } from "express";
 import Deliverable from "../model/deliverable.model.js";
-import { getAuth, notFound, paramId, queryString } from "../utils/http.js";
+import { asObjectId, badRequest, conflict, forbidden, getAuth, notFound, paramId, queryString } from "../utils/http.js";
 import {
-    addFromTasks, asIdArray, asPlanDay, assertOwnerCanChange, carryOverFromPreviousDay, createOwnItem, dayItems,
-    linkableProjects, loadViewer, parseItemFields, planState, populateItems, reorderOwnDay, submitOwnDay,
+    addFromTasks, applyApproverEdit, approvalQueue, approvePlans, asIdArray, asPlanDay, asPlanRefs, assertNotOwnPlan,
+    assertOwnerCanChange, carryOverFromPreviousDay, createItemForEmployee, createOwnItem, dayItems, linkableProjects,
+    loadPlanOwner, loadViewer, parseItemFields, planState, populateItems, reorderOwnDay, requireApprover, submitOwnDay,
+    teamDay,
 } from "../services/deliverable.service.js";
 import { asDayKey, dayKey } from "../utils/dates.js";
 
@@ -23,40 +25,64 @@ export const getMyDay = async (req: Request, res: Response): Promise<void> => {
     });
 };
 
-// POST /api/deliverables   { date?, title, description?, priority?, estimatedHours?, projectId? }
+// POST /api/deliverables   { date?, title, description?, priority?, estimatedHours?, projectId?, employeeId? }
+// employeeId (someone else) = an approver adding to that employee's plan; the item is approved at once.
 export const createDeliverable = async (req: Request, res: Response): Promise<void> => {
     const viewer = await loadViewer(getAuth(req));
     const b = req.body ?? {};
     const date = asPlanDay(b.date);
-    const fields = await parseItemFields(b, { requireTitle: true, employeeId: viewer.id, byApprover: false });
-    const item = await createOwnItem(viewer, date, fields);
+
+    const forOther = b.employeeId !== undefined && String(b.employeeId) !== viewer.id;
+    let item;
+    if (forOther) {
+        requireApprover(viewer);
+        const employee = await loadPlanOwner(b.employeeId, viewer);
+        const fields = await parseItemFields(b, { requireTitle: true, employeeId: String(employee._id), byApprover: true });
+        item = await createItemForEmployee(viewer, employee, date, fields);
+    } else {
+        const fields = await parseItemFields(b, { requireTitle: true, employeeId: viewer.id, byApprover: false });
+        item = await createOwnItem(viewer, date, fields);
+    }
 
     const data = await populateItems(Deliverable.findById(item._id)).lean();
     res.status(201).json({ success: true, message: "Deliverable added", data });
 };
 
-// PATCH /api/deliverables/:id   (owner, until approved)
+// PATCH /api/deliverables/:id   owner until approved; approvers on other people's items at any time
 export const updateDeliverable = async (req: Request, res: Response): Promise<void> => {
     const viewer = await loadViewer(getAuth(req));
     const item = await Deliverable.findById(paramId(req));
     if (!item) throw notFound("Deliverable not found");
 
-    assertOwnerCanChange(item, viewer, "edit");
-    const fields = await parseItemFields(req.body ?? {}, { requireTitle: false, employeeId: viewer.id, byApprover: false });
-    item.set(fields);
+    if (String(item.employeeId) === viewer.id) {
+        assertOwnerCanChange(item, viewer, "edit");
+        const fields = await parseItemFields(req.body ?? {}, { requireTitle: false, employeeId: viewer.id, byApprover: false });
+        item.set(fields);
+    } else {
+        if (!viewer.canApprove) throw forbidden();
+        assertNotOwnPlan(item.employeeId, viewer);
+        const fields = await parseItemFields(req.body ?? {}, { requireTitle: false, employeeId: String(item.employeeId), byApprover: true });
+        applyApproverEdit(item, fields, viewer);
+    }
     await item.save();
 
     const data = await populateItems(Deliverable.findById(item._id)).lean();
     res.status(200).json({ success: true, message: "Deliverable updated", data });
 };
 
-// DELETE /api/deliverables/:id   (owner, until approved)
+// DELETE /api/deliverables/:id   owner until approved; approvers on other people's items until reported
 export const deleteDeliverable = async (req: Request, res: Response): Promise<void> => {
     const viewer = await loadViewer(getAuth(req));
     const item = await Deliverable.findById(paramId(req));
     if (!item) throw notFound("Deliverable not found");
 
-    assertOwnerCanChange(item, viewer, "remove");
+    if (String(item.employeeId) === viewer.id) {
+        assertOwnerCanChange(item, viewer, "remove");
+    } else {
+        if (!viewer.canApprove) throw forbidden();
+        assertNotOwnPlan(item.employeeId, viewer);
+        if (item.reportedAt) throw conflict("This item was already reported in an EOD report");
+    }
     await item.deleteOne();
     res.status(200).json({ success: true, message: "Deliverable removed" });
 };
@@ -119,4 +145,56 @@ export const getLinkableProjects = async (req: Request, res: Response): Promise<
 export const getAccess = async (req: Request, res: Response): Promise<void> => {
     const viewer = await loadViewer(getAuth(req));
     res.status(200).json({ success: true, message: "Access", data: { canApprove: viewer.canApprove, admin: viewer.admin } });
+};
+
+/* ------------------------------------------------------------------ */
+/* Approvers                                                           */
+/* ------------------------------------------------------------------ */
+
+// GET /api/deliverables/day?employeeId=&date=   - one employee's day (self, or approver/admin)
+export const getEmployeeDay = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    const employeeId = String(asObjectId(queryString(req.query.employeeId), "employeeId"));
+    if (employeeId !== viewer.id && !viewer.canApprove) throw forbidden();
+    const date = queryString(req.query.date) ? asDayKey(queryString(req.query.date)) : dayKey();
+    const items = await dayItems(employeeId, date);
+    res.status(200).json({ success: true, message: "Deliverables found", data: { date, state: planState(items), items } });
+};
+
+// GET /api/deliverables/approvals?date= | from=&to=  &employeeId=
+export const getApprovalQueue = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    requireApprover(viewer);
+    const q = req.query;
+    const date = queryString(q.date) ? asDayKey(queryString(q.date)) : undefined;
+    const from = queryString(q.from) ? asDayKey(queryString(q.from), "from") : undefined;
+    const to = queryString(q.to) ? asDayKey(queryString(q.to), "to") : undefined;
+    if (from && to && from > to) throw badRequest("from must not be after to");
+    const employeeId = queryString(q.employeeId) ? String(asObjectId(queryString(q.employeeId), "employeeId")) : undefined;
+
+    const plans = await approvalQueue(viewer, { date, from, to, employeeId });
+    res.status(200).json({ success: true, message: "Plans waiting for approval", data: plans });
+};
+
+// POST /api/deliverables/approve   { plans: [{ employeeId, date }] }   (one plan, or bulk)
+export const approve = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    requireApprover(viewer);
+    const results = await approvePlans(viewer, asPlanRefs(req.body?.plans));
+    const approved = results.reduce((n, r) => n + r.approved, 0);
+    const skippedOwn = results.some(r => r.skipped === "own plan");
+    res.status(200).json({
+        success: true,
+        message: `${approved} item${approved === 1 ? "" : "s"} approved${skippedOwn ? "; your own plan was skipped" : ""}`,
+        data: results,
+    });
+};
+
+// GET /api/deliverables/team?date=&companyId=   - everyone's day, for the EOD meeting
+export const getTeamDay = async (req: Request, res: Response): Promise<void> => {
+    const viewer = await loadViewer(getAuth(req));
+    requireApprover(viewer);
+    const date = queryString(req.query.date) ? asDayKey(queryString(req.query.date)) : dayKey();
+    const companyId = queryString(req.query.companyId) ? String(asObjectId(queryString(req.query.companyId), "companyId")) : undefined;
+    res.status(200).json({ success: true, message: "Team day", data: { date, employees: await teamDay(date, companyId) } });
 };

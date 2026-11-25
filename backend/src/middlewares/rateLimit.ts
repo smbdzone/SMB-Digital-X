@@ -52,3 +52,67 @@ export const rateLimit = (options: Options): RequestHandler => {
         next()
     }
 }
+
+interface FailureOptions {
+    windowMs: number
+    max: number
+    message?: string
+}
+
+/**
+ * Limits FAILED attempts only (used for login). Keyed by email + IP together, so one person
+ * mistyping on their phone does not lock the same email out on another network.
+ *
+ * - A request that ends in 4xx (wrong password, inactive account, missing fields) counts as a failure.
+ *   The first failure starts the window.
+ * - A successful (2xx) request clears the counter for that email + IP.
+ * - Server errors (5xx) and the limiter's own 429s do not count.
+ * - After `max` failures inside the window, requests get 429 until the window ends.
+ *
+ * In memory like rateLimit above. Behind a reverse proxy, req.ip is the proxy's address unless
+ * Express "trust proxy" is configured, and then this is effectively keyed by email alone.
+ */
+export const failedAttemptLimit = (options: FailureOptions): RequestHandler => {
+    const failures = new Map<string, { count: number; resetAt: number }>()
+
+    const timer = setInterval(() => {
+        const now = Date.now()
+        for (const [k, v] of failures) if (v.resetAt <= now) failures.delete(k)
+    }, 60_000)
+    timer.unref()
+
+    const keyOf = (req: Request) => {
+        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
+        return `${email}|${req.ip ?? 'unknown'}`
+    }
+
+    return (req: Request, res: Response, next: NextFunction): void => {
+        const key = keyOf(req)
+        const now = Date.now()
+        const entry = failures.get(key)
+        if (entry && entry.resetAt <= now) failures.delete(key)
+
+        const current = failures.get(key)
+        if (current && current.count >= options.max) {
+            res.setHeader('Retry-After', String(Math.ceil((current.resetAt - now) / 1000)))
+            res.status(429).json({
+                success: false,
+                message: options.message ?? 'Too many failed attempts. Please try again later.',
+            })
+            return
+        }
+
+        res.on('finish', () => {
+            const status = res.statusCode
+            if (status >= 200 && status < 300) {
+                failures.delete(key)
+            } else if (status >= 400 && status < 500 && status !== 429) {
+                const at = Date.now()
+                const existing = failures.get(key)
+                if (!existing || existing.resetAt <= at) failures.set(key, { count: 1, resetAt: at + options.windowMs })
+                else existing.count += 1
+            }
+        })
+        next()
+    }
+}

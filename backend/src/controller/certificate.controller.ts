@@ -66,6 +66,8 @@ const parseIssueInput = (b: any): IssueInput => {
         type: asText(b.type, 'type', { max: 100 }),
         templateId,
         title: asText(b.title, 'title', { max: 200 }),
+        // "" means "no subject" (overrides a saved one); a missing field uses the saved text's subject.
+        subject: b.subject === undefined || b.subject === null ? undefined : asText(b.subject, 'subject', { max: 200 }) ?? '',
         body: asText(b.body, 'body', { max: 8000 }),
         kind: asKind(b.kind),
         companyId: b.companyId ? String(b.companyId) : undefined,

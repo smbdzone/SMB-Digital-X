@@ -18,7 +18,11 @@ const parseCompany = (value: unknown): Types.ObjectId | null => {
     return new Types.ObjectId(String(value))
 }
 
-const withPlaceholders = (t: any) => ({ ...t, ...placeholderInfo(t.title, t.body) })
+const withPlaceholders = (t: any) => ({ ...t, ...placeholderInfo(t.title, t.body, t.subject) })
+
+// "" (or null) clears the subject; undefined leaves it alone.
+const parseSubject = (value: unknown): string | undefined =>
+    value === undefined ? undefined : asText(value, 'subject', { max: 200 }) ?? ''
 
 // GET /api/certificates/templates?companyId=&all=true
 export const listTemplates = async (req: Request, res: Response): Promise<void> => {
@@ -35,7 +39,7 @@ export const listTemplates = async (req: Request, res: Response): Promise<void> 
     res.status(200).json({ success: true, data: data.map(withPlaceholders) })
 }
 
-// POST /api/certificates/templates   { type, title, body, kind?, companyId? }
+// POST /api/certificates/templates   { type, title, subject?, body, kind?, companyId? }
 export const createTemplate = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const b = req.body ?? {}
@@ -49,6 +53,7 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
         typeLabel,
         kind: b.kind !== undefined ? parseKind(b.kind) : 'letter',
         title: asText(b.title, 'title', { required: true, max: 200 }),
+        subject: parseSubject(b.subject) ?? '',
         body: asText(b.body, 'body', { required: true, max: 8000 }),
         companyId: parseCompany(b.companyId),
         createdBy: new Types.ObjectId(auth.id),
@@ -58,7 +63,7 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
     res.status(201).json({ success: true, message: 'Text saved', data: withPlaceholders(template.toObject()) })
 }
 
-// PATCH /api/certificates/templates/:id   { type?, title?, body?, kind?, isActive? }
+// PATCH /api/certificates/templates/:id   { type?, title?, subject?, body?, kind?, isActive? }
 export const updateTemplate = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const b = req.body ?? {}
@@ -72,6 +77,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
     }
     if (b.title !== undefined) template.title = asText(b.title, 'title', { required: true, max: 200 })
     if (b.body !== undefined) template.body = asText(b.body, 'body', { required: true, max: 8000 })
+    if (b.subject !== undefined) template.subject = parseSubject(b.subject)
     if (b.kind !== undefined) template.kind = parseKind(b.kind)
     if (b.isActive !== undefined) {
         if (typeof b.isActive !== 'boolean') throw badRequest('isActive must be true or false')

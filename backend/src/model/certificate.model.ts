@@ -18,6 +18,7 @@ export interface ICertificate extends Document {
 
     // Final text after the {{placeholders}} were replaced. This is exactly what the PDF shows.
     title: string
+    subject?: string
     body: string
     variables: Record<string, string>
     issueDate: Date
@@ -56,6 +57,7 @@ const certificateSchema = new Schema<ICertificate>(
         templateId: { type: Schema.Types.ObjectId, ref: 'CertificateTemplate' },
 
         title: { type: String, required: true },
+        subject: { type: String, default: '' },
         body: { type: String, required: true },
         variables: { type: Schema.Types.Mixed, default: {} },
         issueDate: { type: Date, required: true, default: Date.now },

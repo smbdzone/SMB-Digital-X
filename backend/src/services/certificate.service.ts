@@ -36,8 +36,8 @@ export const findPlaceholders = (...texts: string[]): string[] => {
     return [...found]
 }
 
-export const placeholderInfo = (title: string, body: string) => {
-    const all = findPlaceholders(title, body)
+export const placeholderInfo = (title: string, body: string, subject?: string) => {
+    const all = findPlaceholders(title, subject ?? '', body)
     return {
         placeholders: all,
         // The ones the admin has to provide when issuing
@@ -112,10 +112,11 @@ export const listAvailableTypes = async (companyId?: string) => {
             typeLabel: t.typeLabel,
             kind: t.kind,
             title: t.title,
+            subject: t.subject ?? '',
             body: t.body,
             timesUsed: t.timesUsed,
             lastUsedAt: t.lastUsedAt ?? null,
-            ...placeholderInfo(t.title, t.body),
+            ...placeholderInfo(t.title, t.body, t.subject),
         })),
         ...DEFAULT_TEMPLATES.filter(d => !savedKeys.has(d.typeKey)).map(d => ({
             source: 'default' as const,
@@ -125,10 +126,11 @@ export const listAvailableTypes = async (companyId?: string) => {
             typeLabel: d.typeLabel,
             kind: d.kind,
             title: d.title,
+            subject: d.subject ?? '',
             body: d.body,
             timesUsed: 0,
             lastUsedAt: null,
-            ...placeholderInfo(d.title, d.body),
+            ...placeholderInfo(d.title, d.body, d.subject),
         })),
     ]
 }
@@ -141,6 +143,7 @@ export interface IssueInput {
     type?: string                       // free text, e.g. "Course Completion Certificate"
     templateId?: string                 // alternative to `type`: use this saved text
     title?: string                      // omit to use the saved / built-in text for the type
+    subject?: string                    // "" = no subject line; omit to use the saved one
     body?: string
     kind?: CertificateKind
     companyId?: string                  // default: the employee's own company
@@ -157,6 +160,7 @@ interface Content {
     typeLabel: string
     kind: CertificateKind
     title: string
+    subject: string
     body: string
     templateId?: Types.ObjectId
     pendingSave: boolean     // new wording that still has to be remembered
@@ -201,6 +205,7 @@ const prepareContent = async (ctx: IssueContext, companyId: Types.ObjectId): Pro
     const fallback = saved ?? getDefaultTemplate(typeKey) ?? null
     const title = input.title ?? fallback?.title
     const body = input.body ?? fallback?.body
+    const subject = input.subject ?? fallback?.subject ?? ''
     const kind: CertificateKind = input.kind ?? fallback?.kind ?? 'letter'
 
     if (!title || !body) {
@@ -208,13 +213,15 @@ const prepareContent = async (ctx: IssueContext, companyId: Types.ObjectId): Pro
     }
 
     const changed = !fallback || fallback.title !== title || fallback.body !== body || fallback.kind !== kind
-    const wroteText = input.title !== undefined || input.body !== undefined || input.kind !== undefined
+        || (fallback.subject ?? '') !== subject
+    const wroteText = input.title !== undefined || input.body !== undefined || input.kind !== undefined || input.subject !== undefined
 
     const content: Content = {
         typeKey,
         typeLabel,
         kind,
         title,
+        subject,
         body,
         templateId: saved?._id as Types.ObjectId | undefined,
         // Only a company's own saved text counts as "already remembered" for that company.
@@ -234,6 +241,7 @@ const rememberContent = async (ctx: IssueContext, content: Content): Promise<voi
                 typeLabel: content.typeLabel,
                 kind: content.kind,
                 title: content.title,
+                subject: content.subject,
                 body: content.body,
                 isActive: true,
                 updatedBy: new Types.ObjectId(ctx.adminId),
@@ -285,6 +293,7 @@ interface Prepared {
     content: Content
     issueDate: Date
     title: string
+    subject: string
     body: string
     variables: Record<string, string>
     signatory: { name?: string; title?: string; signature?: string }
@@ -314,8 +323,9 @@ const prepare = async (ctx: IssueContext, employeeId: string): Promise<Prepared>
     const variables = buildVariables(employee as any, company, issueDate, signatory, input.variables)
     const title = renderText(content.title, variables)
     const body = renderText(content.body, variables)
+    const subject = renderText(content.subject, variables)
 
-    const missing = [...new Set([...title.missing, ...body.missing])]
+    const missing = [...new Set([...title.missing, ...subject.missing, ...body.missing])]
     if (missing.length > 0) {
         throw badRequest(
             `Missing values for: ${missing.join(', ')}. Send them in "variables", e.g. { "${missing[0]}": "..." }`,
@@ -329,6 +339,7 @@ const prepare = async (ctx: IssueContext, employeeId: string): Promise<Prepared>
         content,
         issueDate,
         title: title.text.trim(),
+        subject: subject.text.trim(),
         body: body.text.trim(),
         variables,
         signatory,
@@ -343,13 +354,14 @@ export const previewCertificate = async (ctx: IssueContext, employeeId: string) 
         typeLabel: p.content.typeLabel,
         kind: p.content.kind,
         title: p.title,
+        subject: p.subject,
         body: p.body,
         issueDate: p.issueDate,
         signatory: p.signatory,
         recipient: { name: p.employee.name, email: p.employee.email, position: p.employee.position },
         companyName: p.company.name,
         willRememberWording: p.content.pendingSave,
-        ...placeholderInfo(p.content.title, p.content.body),
+        ...placeholderInfo(p.content.title, p.content.body, p.content.subject),
     }
 }
 
@@ -365,6 +377,7 @@ export const previewCertificatePdf = async (ctx: IssueContext, employeeId: strin
         company: pdfCompany(p.company, p.company.name),
         referenceNo: `${String(p.company.code ?? '').toUpperCase()}-${p.content.kind === 'certificate' ? 'CRT' : 'LTR'}-${year}-PREVIEW`,
         title: p.title,
+        subject: p.subject,
         body: p.body,
         employeeName: p.employee.name,
         issueDate: p.issueDate,
@@ -406,6 +419,7 @@ export const issueCertificate = async (ctx: IssueContext, employeeId: string): P
         kind: p.content.kind,
         templateId: p.content.templateId,
         title: p.title,
+        subject: p.subject,
         body: p.body,
         variables: p.variables,
         issueDate: p.issueDate,
@@ -433,6 +447,7 @@ export const issueCertificate = async (ctx: IssueContext, employeeId: string): P
 
 /** Company branding for the certificate PDF (shared by issued documents and previews). */
 const pdfCompany = (company: ICompany | null | undefined, fallbackName: string) => ({
+    code: company?.code,
     name: company?.name ?? fallbackName,
     legalName: company?.legalName,
     logoUrl: resolveLogoUrl(company?.logo),
@@ -440,6 +455,7 @@ const pdfCompany = (company: ICompany | null | undefined, fallbackName: string) 
     address: company?.address,
     phone: company?.phone,
     website: company?.website,
+    contactEmail: company?.email?.replyTo,     // letterhead footer: record only; empty = line left out
     footerNote: company?.email?.footerNote,
 })
 
@@ -453,6 +469,7 @@ export const buildCertificatePdf = async (cert: ICertificate, companyDoc?: IComp
         company: pdfCompany(company, cert.companyName),
         referenceNo: cert.referenceNo,
         title: cert.title,
+        subject: cert.subject,
         body: cert.body,
         employeeName: cert.recipient.name,
         issueDate: cert.issueDate,

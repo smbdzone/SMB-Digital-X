@@ -24,11 +24,14 @@ export interface IUser extends Document {
         amount: number;
         currency: string,
         effectiveFrom: Date,
+        // Recurring monthly allowances (housing, transport, ...). Copied into each new monthly salary record.
+        allowances: { name: string; amount: number }[],
     };
-    // Previous salary values, newest last. Written whenever the salary amount changes.
+    // Previous salary values, newest last. Written whenever the salary amount, currency or allowances change.
     salaryHistory: {
         amount: number;
         currency: string;
+        allowances?: { name: string; amount: number }[];
         effectiveFrom?: Date;
         changedBy?: Types.ObjectId;
         changedAt: Date;
@@ -87,12 +90,22 @@ const userSchema = new mongoose.Schema<IUser>({
             type: Date,
             default: Date.now,
         },
+        allowances: {
+            type: [{
+                _id: false,
+                name: { type: String, required: true, trim: true, maxlength: 100 },
+                amount: { type: Number, required: true, min: 0 },
+            }],
+            default: [],
+        },
     },
     salaryHistory: [
         {
             _id: false,
             amount: Number,
             currency: String,
+            // undefined (not []) on entries written before allowances existed
+            allowances: { type: [{ _id: false, name: String, amount: Number }], default: undefined },
             effectiveFrom: Date,
             changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'users' },
             changedAt: { type: Date, default: Date.now },

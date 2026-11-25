@@ -73,6 +73,11 @@ export const generateMonthlySalaries = async (month: string, companyId?: string)
             continue
         }
 
+        // Recurring allowances from the employee profile, snapshotted into this month's new record.
+        const allowances = (e.salary?.allowances ?? [])
+            .filter(a => a && a.name && typeof a.amount === 'number' && a.amount > 0)
+            .map(a => ({ name: a.name, amount: a.amount }))
+
         ops.push({
             updateOne: {
                 filter: { employeeId: e._id, month },
@@ -81,12 +86,9 @@ export const generateMonthlySalaries = async (month: string, companyId?: string)
                         companyId: e.companyId,
                         currency: e.salary?.currency || 'AED',
                         salary: amount,
-                        allowances: [],
+                        allowances,
                         deductions: [],
-                        totalAllowances: 0,
-                        totalDeductions: 0,
-                        grossAmount: amount,
-                        netPay: amount,
+                        ...computeTotals({ salary: amount, allowances, deductions: [] }),
                         status: 'pending',
                         email: { status: 'not_sent', attempts: 0 },
                         notes: '',

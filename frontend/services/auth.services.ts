@@ -13,12 +13,19 @@ export interface BankDetails {
     iban?: string;
 }
 
+// Recurring monthly allowance on the employee profile (same shape as a salary LineItem).
+export interface SalaryAllowance {
+    name: string;
+    amount: number;
+}
+
 export interface RegisterPayload {
     name: string;
     email: string;
     password: string;
     salaryAmount?: number;
     salaryCurrency?: string;
+    salaryAllowances?: SalaryAllowance[];
     companyId?: string;
     position?: string;
     bankDetails?: BankDetails;
@@ -33,6 +40,7 @@ export interface UpdateEmployeePayload {
     status?: "active" | "inactive";
     salaryAmount?: number;
     salaryCurrency?: string;
+    salaryAllowances?: SalaryAllowance[];
     companyId?: string;
     bankDetails?: BankDetails;
 }
@@ -46,7 +54,7 @@ export interface User {
     position?: string
     status?: "active" | "inactive";
     companyId?: string;
-    salary?: { amount?: number; currency?: string; effectiveFrom?: string };
+    salary?: { amount?: number; currency?: string; effectiveFrom?: string; allowances?: SalaryAllowance[] };
     [key: string]: unknown;
 }
 

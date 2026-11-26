@@ -9,6 +9,7 @@ import {
     FiClipboard as ClipboardList,
     FiSettings as Settings,
     FiLogOut as LogOut,
+    FiLock as Lock,
     FiX as X,
     FiHome as Home,
     FiFileText as FileText,
@@ -28,6 +29,7 @@ import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
 import { VscProject } from "react-icons/vsc";
 import { useDeliverableAccess } from "@/hooks/useDeliverableAccess";
+import ChangePasswordModal from "./ChangePasswordModal";
 
 // Daily deliverables. The approval queue and the team day are only for approvers
 // (the admin and employees the admin flagged with canApproveDeliverables).
@@ -192,6 +194,7 @@ function Sidebar({
     const pathname = usePathname();
     const router = useRouter()
     const [navigation, setNavigation] = useState<any[]>([])
+    const [changingPassword, setChangingPassword] = useState(false)
 
     useEffect(() => {
         if (role === 'employee') {
@@ -326,6 +329,15 @@ function Sidebar({
 
                     <button
                         type="button"
+                        onClick={() => setChangingPassword(true)}
+                        className="mt-1 flex w-full items-center gap-3 rounded-button px-3 py-2.5 text-sm font-medium text-text-secondary hover:bg-surface-soft hover:text-charcoal"
+                    >
+                        <Lock size={18} />
+                        <span>Change password</span>
+                    </button>
+
+                    <button
+                        type="button"
                         onClick={() => {
                             logout();
                             router.push('/login')
@@ -337,6 +349,7 @@ function Sidebar({
                     </button>
                 </div>
             </aside>
+            <ChangePasswordModal open={changingPassword} onClose={() => setChangingPassword(false)} />
         </>
     );
 }

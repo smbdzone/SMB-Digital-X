@@ -35,6 +35,8 @@ interface AuthContextValue {
     loginUser: (payload: LoginPayload) => Promise<User>;
     logout: () => void;
     clearError: () => void;
+    /** After changing the password: keep this session with the new token the server returned. */
+    replaceToken: (nextToken: string) => void;
 }
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
@@ -215,6 +217,10 @@ export const AuthProvider = ({
         setError(null);
     }, []);
 
+    const replaceToken = useCallback((nextToken: string) => {
+        if (user) persistSession(nextToken, user);
+    }, [persistSession, user]);
+
     const isAuthenticated = Boolean(token && user);
 
     /*
@@ -232,6 +238,7 @@ export const AuthProvider = ({
             loginUser,
             logout,
             clearError,
+            replaceToken,
         }),
         [
             user,
@@ -243,6 +250,7 @@ export const AuthProvider = ({
             loginUser,
             logout,
             clearError,
+            replaceToken,
         ]
     );
 

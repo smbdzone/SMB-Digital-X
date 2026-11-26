@@ -22,6 +22,8 @@ export const reminderConfig = () => ({
     cooldownMs: positive(process.env.CHAT_REMINDER_COOLDOWN_MINUTES, 60) * 60_000,  // at most one email per person per chat in this time
     maxAgeMs: positive(process.env.CHAT_REMINDER_MAX_AGE_HOURS, 24) * 3_600_000,    // never email about messages older than this
     maxEmailsPerRun: positive(process.env.CHAT_REMINDER_MAX_PER_RUN, 50),
+    // After a pause (host asleep, cron every N minutes) the job looks back to its previous run, but never further than this.
+    catchUpMaxMs: positive(process.env.CHAT_REMINDER_CATCHUP_MAX_DAYS, 7) * 86_400_000,
     preview: process.env.CHAT_REMINDER_PREVIEW === 'true',                          // finance chats: default is NO message text in emails
 });
 
@@ -109,16 +111,35 @@ export const buildReminderGroups = (rows: ReminderRow[], now: number, cooldownMs
 
 const frontendUrl = () => (process.env.FRONTEND || process.env.CLIENT_URL || 'http://localhost:3000').replace(/\/+$/, '');
 
-/** Emails people about chat messages they have not opened for `delayMs`. Safe to call every minute. */
-export const sendUnreadChatReminders = async (): Promise<void> => {
+export interface ReminderRunResult {
+    enabled: boolean;
+    sent: number;
+    windowFrom?: Date;
+}
+
+/**
+ * Which messages to look at: those that became due (older than `delayMs`) since the previous run. A message
+ * is due at createdAt + delay, so the window starts at lastRunAt - delay; it always covers at least the
+ * last `maxAge` hours (as before) and never more than `catchUpMax` days. Works whatever the interval
+ * between runs: every minute from node-cron, every 5 minutes from cPanel, or after the app was paused.
+ */
+export const reminderWindowStart = (now: number, lastRunAt: Date | null | undefined, cfg: ReturnType<typeof reminderConfig>): number => {
+    let from = now - cfg.maxAgeMs;
+    if (lastRunAt) from = Math.min(from, lastRunAt.getTime() - cfg.delayMs);
+    return Math.max(from, now - cfg.catchUpMaxMs);
+};
+
+/** Emails people about chat messages they have not opened for `delayMs`. Safe to call any number of times. */
+export const sendUnreadChatReminders = async (opts: { lastRunAt?: Date | null } = {}): Promise<ReminderRunResult> => {
     const cfg = reminderConfig();
-    if (!cfg.enabled) return;
+    if (!cfg.enabled) return { enabled: false, sent: 0 };
 
     const now = Date.now();
+    const windowFrom = new Date(reminderWindowStart(now, opts.lastRunAt, cfg));
 
-    // Messages in the window [now - maxAge, now - delay], joined with their conversation's participants.
+    // Messages in the window [windowFrom, now - delay], joined with their conversation's participants.
     const rows: ReminderRow[] = await messageModel.aggregate([
-        { $match: { createdAt: { $gte: new Date(now - cfg.maxAgeMs), $lte: new Date(now - cfg.delayMs) } } },
+        { $match: { createdAt: { $gte: windowFrom, $lte: new Date(now - cfg.delayMs) } } },
         { $sort: { createdAt: 1 } },
         { $lookup: { from: conversationModel.collection.name, localField: 'conversationId', foreignField: '_id', as: 'conv' } },
         { $unwind: '$conv' },
@@ -134,7 +155,7 @@ export const sendUnreadChatReminders = async (): Promise<void> => {
     ]);
 
     const groups = buildReminderGroups(rows, now, cfg.cooldownMs).slice(0, cfg.maxEmailsPerRun);
-    if (groups.length === 0) return;
+    if (groups.length === 0) return { enabled: true, sent: 0, windowFrom };
 
     // One query for every name and email we need.
     const userIds = new Set<string>();
@@ -188,4 +209,5 @@ export const sendUnreadChatReminders = async (): Promise<void> => {
     }
 
     if (sent > 0) console.log(`[chat-reminder] sent ${sent} reminder email(s)`);
+    return { enabled: true, sent, windowFrom };
 };

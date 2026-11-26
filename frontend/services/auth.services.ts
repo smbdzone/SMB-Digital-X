@@ -76,6 +76,18 @@ export const login = (
     });
 };
 
+/** Own account only; needs the current password. Returns a fresh token (other sessions are signed out). */
+export const changePassword = (
+    token: string,
+    payload: { currentPassword: string; newPassword: string }
+): Promise<ApiEnvelope<{ token: string }>> => {
+    return apiClient<ApiEnvelope<{ token: string }>>("/auth/change-password", {
+        method: "POST",
+        token,
+        body: JSON.stringify(payload),
+    });
+};
+
 export const fetchProfile = (
     token: string
 ): Promise<ApiEnvelope<User>> => {

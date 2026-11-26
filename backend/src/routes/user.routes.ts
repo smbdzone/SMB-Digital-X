@@ -1,5 +1,5 @@
 import express from "express";
-import { deleteUserController, getAllUserController, getUserController, loginController, registerController, updateController } from "../controller/user.controller.js";
+import { changePasswordController, deleteUserController, getAllUserController, getUserController, loginController, registerController, updateController } from "../controller/user.controller.js";
 import { isAllow, isVerified } from "../middlewares/isVerified.js";
 import { forgotPasswordController, resetPasswordController, verifyResetCodeController } from "../controller/passwordReset.controller.js";
 import { failedAttemptLimit, rateLimit } from "../middlewares/rateLimit.js";
@@ -19,6 +19,8 @@ route.post('/forgot-password', rateLimit({ windowMs: FIFTEEN_MIN, max: 5, messag
 route.post('/verify-reset-code', rateLimit({ windowMs: FIFTEEN_MIN, max: 15, message: 'Too many attempts. Please try again in a few minutes.' }), verifyResetCodeController)
 route.post('/reset-password', rateLimit({ windowMs: FIFTEEN_MIN, max: 15, message: 'Too many attempts. Please try again in a few minutes.' }), resetPasswordController)
 
+// Signed in, own account: needs the current password. Limited per IP like the reset endpoints.
+route.post('/change-password', isVerified, rateLimit({ windowMs: FIFTEEN_MIN, max: 10, message: 'Too many attempts. Please try again in a few minutes.' }), changePasswordController)
 route.patch('/update/:id', isVerified, isAllow(['admin', 'employee']), updateController)
 route.get('/user', isVerified, isAllow(['admin', 'employee']), getUserController)
 route.get('/all-user', isVerified, isAllow(['admin', 'employee']), getAllUserController)

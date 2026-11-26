@@ -56,9 +56,15 @@ const assertProjectAccess = async (projectId: string, auth: AuthUser) => {
     return project
 }
 
-const canViewExpense = (expense: { addedBy: unknown }, auth: AuthUser): boolean => {
-    const ownerId = String((expense.addedBy as any)?._id ?? expense.addedBy)
-    return isAdmin(auth) || ownerId === auth.id
+// Employees only ever see the expenses they added (the model has no other person field). The admin sees all.
+const ownOnly = (auth: AuthUser): Record<string, unknown> =>
+    isAdmin(auth) ? {} : { addedBy: new Types.ObjectId(auth.id) }
+
+// Another person's expense answers 404, the same as one that does not exist, so ids reveal nothing.
+const findVisibleExpense = async (id: string, auth: AuthUser) => {
+    const expense = await Expense.findOne({ _id: id, ...ownOnly(auth) })
+    if (!expense) throw notFound('Expense not found')
+    return expense
 }
 
 const populateExpense = <T extends { populate: (...args: any[]) => T }>(query: T): T =>
@@ -159,7 +165,7 @@ export const getAllExpenses = async (req: Request, res: Response): Promise<void>
     const q = req.query
     const filter: Record<string, unknown> = {}
 
-    if (!isAdmin(auth)) filter.addedBy = new Types.ObjectId(auth.id)
+    Object.assign(filter, ownOnly(auth))
 
     const projectId = queryString(q.projectId)
     if (projectId) filter.projectId = asObjectId(projectId, 'projectId')
@@ -199,9 +205,14 @@ export const getAllExpenses = async (req: Request, res: Response): Promise<void>
 export const getProjectExpensesController = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const projectId = paramId(req, 'projectId')
-    await assertProjectAccess(projectId, auth)
+    if (isAdmin(auth)) {
+        await assertProjectAccess(projectId, auth)
+    } else if (!(await Project.exists({ _id: projectId }))) {
+        throw notFound('Project not found')
+    }
 
-    const filter: Record<string, unknown> = { projectId: new Types.ObjectId(projectId) }
+    // An employee gets only their own expenses on the project, and totals of those only.
+    const filter: Record<string, unknown> = { projectId: new Types.ObjectId(projectId), ...ownOnly(auth) }
     const { data, pagination } = await listResponse(filter, req.query)
     res.status(200).json({ success: true, data, pagination })
 }
@@ -209,9 +220,8 @@ export const getProjectExpensesController = async (req: Request, res: Response):
 // GET /api/expenses/:id
 export const getExpenseController = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
-    const expense = await populateExpense(Expense.findById(paramId(req)))
+    const expense = await populateExpense(Expense.findOne({ _id: paramId(req), ...ownOnly(auth) }))
     if (!expense) throw notFound('Expense not found')
-    if (!canViewExpense(expense, auth)) throw forbidden()
 
     res.status(200).json({ success: true, data: expense })
 }
@@ -227,11 +237,9 @@ export const updateExpenseController = async (req: Request, res: Response): Prom
     const id = paramId(req)
     const b = req.body ?? {}
 
-    const existing = await Expense.findById(id)
-    if (!existing) throw notFound('Expense not found')
+    const existing = await findVisibleExpense(id, auth)
 
     if (!isAdmin(auth)) {
-        if (String(existing.addedBy) !== auth.id) throw forbidden()
         if (existing.status !== 'pending') throw forbidden('Only pending expenses can be edited. Ask an admin to change it.')
         if (b.companyId !== undefined) throw forbidden('Only an admin can change the company of an expense')
     }
@@ -308,9 +316,7 @@ const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf
 // POST /api/expenses/:id/receipts  (multipart, field name "receipt")
 export const uploadReceiptController = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
-    const expense = await Expense.findById(paramId(req))
-    if (!expense) throw notFound('Expense not found')
-    if (!canViewExpense(expense, auth)) throw forbidden()
+    const expense = await findVisibleExpense(paramId(req), auth)
     if (!isAdmin(auth) && expense.status !== 'pending') throw forbidden('Receipts can only be added while the expense is pending')
 
     const file = req.file
@@ -339,9 +345,7 @@ export const uploadReceiptController = async (req: Request, res: Response): Prom
 // DELETE /api/expenses/:id/receipts/:receiptId
 export const deleteReceiptController = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
-    const expense = await Expense.findById(paramId(req))
-    if (!expense) throw notFound('Expense not found')
-    if (!canViewExpense(expense, auth)) throw forbidden()
+    const expense = await findVisibleExpense(paramId(req), auth)
     if (!isAdmin(auth) && expense.status !== 'pending') throw forbidden('Receipts can only be removed while the expense is pending')
 
     const receipt = expense.receipts.find(r => String(r._id) === paramId(req, 'receiptId'))

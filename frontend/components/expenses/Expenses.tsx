@@ -224,7 +224,8 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
     const canEdit = (e: Expense) => isAdmin || (expenseOwnerId(e) === myId && e.status === "pending");
 
     const assignedProjects = useMemo(
-        () => (isAdmin ? projects : projects.filter(p => p.employees?.some(emp => emp._id === myId))),
+        // Employees get `isMember` from the API (the member list itself is admin-only)
+        () => (isAdmin ? projects : projects.filter(p => p.isMember)),
         [projects, isAdmin, myId]
     );
     const projectOptions = assignedProjects.map(p => ({ value: p._id, label: p.name }));

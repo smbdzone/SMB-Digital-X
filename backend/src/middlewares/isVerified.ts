@@ -40,9 +40,10 @@ export const isVerified = async (
             process.env.JWT_SECRET!
         ) as JWT_PAYLOAD;
 
-        // After a password reset, every token issued before it stops working.
+        // The account is read on every request, so a deactivation or a role change takes effect at once
+        // (not when the 30-day token expires). After a password reset, every older token stops working.
         // (Also rejects tokens of accounts that were deleted.)
-        const account = await User.findById(verify.id).select("passwordChangedAt").lean();
+        const account = await User.findById(verify.id).select("passwordChangedAt role status").lean();
         if (!account) {
             res.status(401).json({
                 success: false,
@@ -59,10 +60,18 @@ export const isVerified = async (
             return;
         }
 
-        // Attach authenticated user to request
+        if (account.status === "inactive") {
+            res.status(403).json({
+                success: false,
+                message: "Your account is inactive. Please contact the admin.",
+            });
+            return;
+        }
+
+        // Attach authenticated user to request. The role comes from the database, not from the token.
         req.user = {
             id: verify.id,
-            role: verify.role,
+            role: account.role,
         };
 
         next();

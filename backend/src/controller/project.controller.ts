@@ -1,5 +1,25 @@
 import { Request, Response } from 'express'
+import { Types } from 'mongoose'
 import Project from '../model/project.model.js'
+import Task from '../model/task.model.js'
+import { getAuth, isAdmin, isObjectId } from '../utils/http.js'
+
+// What an employee may see of a project they work on: no budget, no team contact details.
+const EMPLOYEE_PROJECT_FIELDS = 'name clientName description category startDate deadline status'
+
+// The projects an employee may read: those they are a member of, or have at least one task in.
+const employeeProjectFilter = async (employeeId: string) => {
+    const id = new Types.ObjectId(employeeId)
+    const withTasks = await Task.distinct('projectId', { assignedTo: id })
+    return { $or: [{ employees: id }, { _id: { $in: withTasks } }] }
+}
+
+// The employee view: the safe fields plus `isMember` (members may file expenses on the project).
+// The member list itself is not returned.
+const employeeView = <T extends { employees?: unknown[] }>(project: T, employeeId: string) => {
+    const { employees, ...rest } = project
+    return { ...rest, isMember: (employees ?? []).some(e => String(e) === employeeId) }
+}
 
 // Create Project
 export const createProjectController = async (
@@ -61,9 +81,15 @@ export const getProjectsController = async (
     res: Response
 ): Promise<void> => {
     try {
-        const projects = await Project.find()
-            .populate('employees', 'name email role')
-            .sort({ createdAt: -1 })
+        const auth = getAuth(req)
+        const projects = isAdmin(auth)
+            ? await Project.find()
+                .populate('employees', 'name email role')
+                .sort({ createdAt: -1 })
+            : (await Project.find(await employeeProjectFilter(auth.id))
+                .select(`${EMPLOYEE_PROJECT_FIELDS} employees`)
+                .sort({ createdAt: -1 })
+                .lean()).map(p => employeeView(p, auth.id))
 
         res.status(200).json({
             success: true,
@@ -87,9 +113,22 @@ export const getProjectController = async (
 ): Promise<void> => {
     try {
         const { id } = req.params
+        const auth = getAuth(req)
 
-        const project = await Project.findById(id)
-            .populate('employees', 'name email role')
+        if (!isObjectId(id)) {
+            res.status(400).json({ success: false, message: 'Invalid project id' })
+            return
+        }
+        // An employee gets the same 404 for a project they cannot read as for one that does not exist.
+        let project
+        if (isAdmin(auth)) {
+            project = await Project.findById(id).populate('employees', 'name email role')
+        } else {
+            const found = await Project.findOne({ $and: [{ _id: new Types.ObjectId(id) }, await employeeProjectFilter(auth.id)] })
+                .select(`${EMPLOYEE_PROJECT_FIELDS} employees`)
+                .lean()
+            project = found ? employeeView(found, auth.id) : null
+        }
 
         if (!project) {
             res.status(404).json({

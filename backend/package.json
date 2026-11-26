@@ -8,7 +8,8 @@
     "dev": "tsx watch src/server.ts",
     "start": "node dist/server.js",
     "migrate": "tsx src/scripts/migrate-company-salary.ts",
-    "migrate:eod": "tsx src/scripts/migrate-eod-datekey.ts"
+    "migrate:eod": "tsx src/scripts/migrate-eod-datekey.ts",
+    "dev-copy": "tsx scripts/make-dev-copy.ts"
   },
   "keywords": [],
   "author": "",

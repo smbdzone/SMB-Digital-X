@@ -170,6 +170,15 @@ export const previewCertificate = (token: string, payload: IssuePayload & { empl
         body: JSON.stringify(payload),
     });
 
+// Same body as previewCertificate. Returns the real PDF layout; nothing is saved and no reference number is used.
+export const previewCertificatePdf = (token: string, payload: IssuePayload & { employeeId: string }) =>
+    apiClient<Blob>('/certificates/preview/pdf', {
+        method: 'POST',
+        token,
+        body: JSON.stringify(payload),
+        responseType: 'blob',
+    });
+
 export const issueCertificate = (token: string, payload: IssuePayload & { employeeId: string }) =>
     apiClient<ApiEnvelope<ICertificate> & { email: EmailOutcome }>('/certificates', {
         method: 'POST',

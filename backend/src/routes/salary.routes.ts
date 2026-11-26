@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import {
     bulkPaySalariesController,
+    downloadSalarySlipPdf,
     generateSalaries,
     getAllSalaries,
     getMySalaries,
@@ -25,6 +26,7 @@ routes.post('/generate', adminOnly, generateSalaries);
 routes.post('/bulk-pay', adminOnly, bulkPaySalariesController);
 
 // Admin, or the owner for GET (checked inside the controller)
+routes.get('/:id/pdf', downloadSalarySlipPdf);
 routes.get('/:id', getSalary);
 routes.patch('/:id', adminOnly, updateSalary);
 routes.post('/:id/resend-email', adminOnly, resendSalarySlip);

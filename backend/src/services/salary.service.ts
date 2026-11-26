@@ -73,6 +73,11 @@ export const generateMonthlySalaries = async (month: string, companyId?: string)
             continue
         }
 
+        // Recurring allowances from the employee profile, snapshotted into this month's new record.
+        const allowances = (e.salary?.allowances ?? [])
+            .filter(a => a && a.name && typeof a.amount === 'number' && a.amount > 0)
+            .map(a => ({ name: a.name, amount: a.amount }))
+
         ops.push({
             updateOne: {
                 filter: { employeeId: e._id, month },
@@ -81,12 +86,9 @@ export const generateMonthlySalaries = async (month: string, companyId?: string)
                         companyId: e.companyId,
                         currency: e.salary?.currency || 'AED',
                         salary: amount,
-                        allowances: [],
+                        allowances,
                         deductions: [],
-                        totalAllowances: 0,
-                        totalDeductions: 0,
-                        grossAmount: amount,
-                        netPay: amount,
+                        ...computeTotals({ salary: amount, allowances, deductions: [] }),
                         status: 'pending',
                         email: { status: 'not_sent', attempts: 0 },
                         notes: '',
@@ -148,44 +150,13 @@ export const sendSlipEmail = async (salaryId: string | Types.ObjectId): Promise<
 
     const employee = doc.employeeId as unknown as { name?: string; email?: string; position?: string } | null
     const company = doc.companyId as unknown as ICompany | null
-    const payer = doc.paidBy as unknown as { name?: string } | null
 
     try {
         if (!company || !('name' in company)) throw new Error('The paying company no longer exists')
         if (!employee?.email) throw new Error('Employee has no email address')
 
-        const approvedBy = company.signatory?.name || doc.paidByName || payer?.name || company.name
-
-        const slip: SalarySlipData = {
-            company: {
-                name: company.name,
-                legalName: company.legalName,
-                logoUrl: resolveLogoUrl(company.logo),
-                brandColor: company.brandColor,
-                address: company.address,
-                phone: company.phone,
-                website: company.website,
-                footerNote: company.email?.footerNote,
-            },
-            employeeName: employee.name || 'Employee',
-            role: employee.position || '',
-            month: doc.month,
-            currency: doc.currency,
-            salary: doc.salary,
-            allowances: doc.allowances,
-            deductions: doc.deductions,
-            totalAllowances: doc.totalAllowances,
-            totalDeductions: doc.totalDeductions,
-            grossAmount: doc.grossAmount,
-            netPay: doc.netPay,
-            payment: doc.paymentDetails
-                ? { ...doc.paymentDetails, holderName: doc.paymentDetails.holderName || employee.name }
-                : undefined,
-            paidOn: doc.paidOn,
-            approvedBy,
-            approvedByTitle: company.signatory?.name ? company.signatory?.title : undefined,
-            signature: company.signatory?.signature,
-        }
+        // Same builder as GET /salary/:id/pdf, so the attachment and the in-app PDF are identical.
+        const slip = buildSlipData(doc)
 
         // The slip is sent as a PDF attachment; the email body is only a short message.
         const pdf = await generateSalarySlipPdf(slip)
@@ -218,6 +189,92 @@ export const sendSlipEmail = async (salaryId: string | Types.ObjectId): Promise<
         await recordEmail(doc._id, { status: 'failed', error: message.slice(0, 500) })
         return { status: 'failed', error: message }
     }
+}
+
+/* ------------------------------------------------------------------ */
+/* Slip data + PDF (shared by the email and GET /salary/:id/pdf)       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Builds the slip data from a salary document populated with
+ * employeeId (name email position), companyId and paidBy (name).
+ * Throws if the paying company no longer exists.
+ */
+export const buildSlipData = (doc: any): SalarySlipData => {
+    const employee = doc.employeeId as { name?: string; email?: string; position?: string } | null
+    const company = doc.companyId as ICompany | null
+    const payer = doc.paidBy as { name?: string } | null
+    if (!company || !('name' in company)) throw new Error('The paying company no longer exists')
+
+    const approvedBy = company.signatory?.name || doc.paidByName || payer?.name || company.name
+    const payment = doc.paymentDetails ? { ...doc.paymentDetails } as IPaymentDetails : undefined
+    const hasPayment = !!payment && Object.values(payment).some(Boolean)
+
+    return {
+        company: {
+            name: company.name,
+            legalName: company.legalName,
+            logoUrl: resolveLogoUrl(company.logo),
+            brandColor: company.brandColor,
+            address: company.address,
+            phone: company.phone,
+            website: company.website,
+            footerNote: company.email?.footerNote,
+        },
+        employeeName: employee?.name || 'Employee',
+        employeeEmail: employee?.email,
+        // TODO: use the employee's real employeeCode once that profile field exists (prints "-" until then).
+        employeeCode: undefined,
+        slipNo: `PS-${doc.month}-${String(doc._id).slice(-6).toUpperCase()}`,
+        draft: doc.status !== 'paid',
+        role: employee?.position || '',
+        month: doc.month,
+        currency: doc.currency,
+        salary: doc.salary,
+        allowances: (doc.allowances ?? []).map((a: ILineItem) => ({ name: a.name, amount: a.amount })),
+        deductions: (doc.deductions ?? []).map((d: ILineItem) => ({ name: d.name, amount: d.amount })),
+        totalAllowances: doc.totalAllowances,
+        totalDeductions: doc.totalDeductions,
+        grossAmount: doc.grossAmount,
+        netPay: doc.netPay,
+        payment: hasPayment ? { ...payment, holderName: payment!.holderName || employee?.name } : undefined,
+        paidOn: doc.paidOn,
+        approvedBy,
+        approvedByTitle: company.signatory?.name ? company.signatory?.title : undefined,
+        signature: company.signatory?.signature,
+    }
+}
+
+/**
+ * PDF of one salary slip.
+ * Admins can open any record (unpaid ones are watermarked DRAFT); employees only their own PAID slips.
+ */
+export const getSlipPdf = async (
+    salaryId: string,
+    viewer: { id: string; admin: boolean }
+): Promise<{ pdf: Buffer; fileName: string }> => {
+    const doc = await Salary.findById(salaryId)
+        .populate('employeeId', 'name email position')
+        .populate('companyId')
+        .populate('paidBy', 'name')
+    if (!doc) throw notFound('Salary record not found')
+
+    if (!viewer.admin) {
+        const ownerId = String((doc.employeeId as any)?._id ?? doc.employeeId)
+        if (ownerId !== viewer.id || doc.status !== 'paid') {
+            throw new AppError(403, 'You can only view your own paid salary slips')
+        }
+    }
+
+    let slip: SalarySlipData
+    try {
+        slip = buildSlipData(doc)
+    } catch (error) {
+        throw conflict(error instanceof Error ? error.message : 'This salary slip cannot be built')
+    }
+
+    const pdf = await generateSalarySlipPdf(slip)
+    return { pdf, fileName: slipFileName(slip.employeeName, doc.month) }
 }
 
 /* ------------------------------------------------------------------ */

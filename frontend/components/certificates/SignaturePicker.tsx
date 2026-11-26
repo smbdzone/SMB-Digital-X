@@ -3,23 +3,30 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { FiPenTool, FiX } from 'react-icons/fi'
 
+import { processSignatureFile } from '@/lib/signatureClean'
+
 /**
  * The owner's signature for ONE issue / bulk issue / resend.
  *
  * Kept only in React state (memory): never in localStorage, sessionStorage, IndexedDB, cookies or any cache.
  * The parent clears it after use, on cancel, and it disappears when the page is left (unmount).
+ *
+ * The picked file is processed in the browser first (lib/signatureClean.ts): background made transparent and
+ * cropped to the ink. What is previewed, sent and printed is that processed PNG.
  */
 export interface PickedSignature {
-    /** base64 of the file, sent in the JSON body */
+    /** base64 of the processed PNG, sent in the JSON body */
     base64: string
-    /** object URL for the small preview; revoked when the signature is cleared */
+    /** object URL of the processed PNG for the preview; revoked when the signature is cleared */
     previewUrl: string
     name: string
+    width: number
+    height: number
 }
 
 export const SIGNATURE_MAX_BYTES = 1024 * 1024
 
-const readAsBase64 = (file: File): Promise<string> =>
+const readAsBase64 = (file: Blob): Promise<string> =>
     new Promise((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => {
@@ -49,6 +56,7 @@ interface SignaturePickerProps {
 const SignaturePicker = ({ value, onChange, disabled, note }: SignaturePickerProps) => {
     const inputRef = useRef<HTMLInputElement>(null)
     const [error, setError] = useState<string | null>(null)
+    const [processing, setProcessing] = useState(false)
 
     // Free the preview URL when it is replaced, cleared, or the picker goes away.
     useEffect(() => () => { if (value?.previewUrl) URL.revokeObjectURL(value.previewUrl) }, [value?.previewUrl])
@@ -58,12 +66,17 @@ const SignaturePicker = ({ value, onChange, disabled, note }: SignaturePickerPro
         if (!file) return
         setError(null)
         if (file.size > SIGNATURE_MAX_BYTES) return setError('The image must be at most 1 MB.')
-        if (!(await looksLikeImage(file))) return setError('Choose a PNG (transparent background recommended) or JPG image.')
+        if (!(await looksLikeImage(file))) return setError('Choose a PNG or JPG image.')
+        setProcessing(true)
         try {
-            const base64 = await readAsBase64(file)
-            onChange({ base64, previewUrl: URL.createObjectURL(file), name: file.name })
-        } catch {
-            setError('Could not read the file.')
+            // Background -> transparent, cropped to the ink. In memory only.
+            const processed = await processSignatureFile(file)
+            const base64 = await readAsBase64(processed.blob)
+            onChange({ base64, previewUrl: URL.createObjectURL(processed.blob), name: file.name, width: processed.width, height: processed.height })
+        } catch (e) {
+            setError(e instanceof Error && e.message ? e.message : 'Could not read the file.')
+        } finally {
+            setProcessing(false)
         }
     }
 
@@ -80,9 +93,18 @@ const SignaturePicker = ({ value, onChange, disabled, note }: SignaturePickerPro
 
             {value ? (
                 <div className="flex items-center gap-3 rounded-xl border border-charcoal/10 bg-surface p-3">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={value.previewUrl} alt="Signature preview" className="h-12 max-w-[160px] rounded bg-white object-contain p-1" />
-                    <span className="min-w-0 flex-1 truncate text-xs text-charcoal/60">{value.name}</span>
+                    {/* Checkerboard behind the processed image: transparent parts show as checks, so what you see is what is printed. */}
+                    <span
+                        className="inline-flex h-16 w-44 shrink-0 items-center justify-center rounded border border-charcoal/10 p-1"
+                        style={{ backgroundImage: 'repeating-conic-gradient(#e5e7eb 0% 25%, #ffffff 0% 50%)', backgroundSize: '12px 12px' }}
+                    >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img src={value.previewUrl} alt="Signature as it will be printed" className="max-h-full max-w-full object-contain" />
+                    </span>
+                    <span className="min-w-0 flex-1 text-xs text-charcoal/60">
+                        <span className="block truncate">{value.name}</span>
+                        <span className="block text-charcoal/45">Background removed and cropped. This is exactly what is printed.</span>
+                    </span>
                     <button
                         type="button"
                         onClick={() => onChange(null)}
@@ -96,16 +118,16 @@ const SignaturePicker = ({ value, onChange, disabled, note }: SignaturePickerPro
                 <button
                     type="button"
                     onClick={() => inputRef.current?.click()}
-                    disabled={disabled}
+                    disabled={disabled || processing}
                     className="inline-flex h-11 items-center gap-2 rounded-xl border border-dashed border-charcoal/20 bg-white px-4 text-sm font-semibold text-charcoal transition hover:border-blue-500/50 hover:bg-blue-50 disabled:opacity-50"
                 >
-                    <FiPenTool className="size-4" /> Choose signature image
+                    <FiPenTool className="size-4" /> {processing ? 'Preparing signature...' : 'Choose signature image'}
                 </button>
             )}
 
             {error && <p className="mt-2 text-xs text-red-600">{error}</p>}
             <p className="mt-2 text-xs text-charcoal/50">
-                PNG with a transparent background recommended, JPG allowed, max 1 MB. Used once and never saved.
+                PNG or JPG, max 1 MB. A photo on white paper works: the background is removed. Used once and never saved.
             </p>
             {note && <div className="mt-1 text-xs text-charcoal/50">{note}</div>}
         </div>

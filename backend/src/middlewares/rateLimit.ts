@@ -63,8 +63,10 @@ interface FailureOptions {
  * Limits FAILED attempts only (used for login). Keyed by email + IP together, so one person
  * mistyping on their phone does not lock the same email out on another network.
  *
- * - A request that ends in 4xx (wrong password, inactive account, missing fields) counts as a failure.
+ * - A request that ends in 4xx (wrong password, inactive account) counts as a failure.
  *   The first failure starts the window.
+ * - 400 (missing or malformed body) never counts, and neither does a request without an email:
+ *   it tested no password, so it must not move any email + IP counter or lock anyone out.
  * - A successful (2xx) request clears the counter for that email + IP.
  * - Server errors (5xx) and the limiter's own 429s do not count.
  * - After `max` failures inside the window, requests get 429 until the window ends.
@@ -81,13 +83,15 @@ export const failedAttemptLimit = (options: FailureOptions): RequestHandler => {
     }, 60_000)
     timer.unref()
 
-    const keyOf = (req: Request) => {
-        const email = typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
-        return `${email}|${req.ip ?? 'unknown'}`
-    }
+    const emailOf = (req: Request) => typeof req.body?.email === 'string' ? req.body.email.trim().toLowerCase() : ''
 
     return (req: Request, res: Response, next: NextFunction): void => {
-        const key = keyOf(req)
+        const email = emailOf(req)
+        if (!email) {
+            next()
+            return
+        }
+        const key = `${email}|${req.ip ?? 'unknown'}`
         const now = Date.now()
         const entry = failures.get(key)
         if (entry && entry.resetAt <= now) failures.delete(key)
@@ -106,7 +110,7 @@ export const failedAttemptLimit = (options: FailureOptions): RequestHandler => {
             const status = res.statusCode
             if (status >= 200 && status < 300) {
                 failures.delete(key)
-            } else if (status >= 400 && status < 500 && status !== 429) {
+            } else if (status > 400 && status < 500 && status !== 429) {
                 const at = Date.now()
                 const existing = failures.get(key)
                 if (!existing || existing.resetAt <= at) failures.set(key, { count: 1, resetAt: at + options.windowMs })

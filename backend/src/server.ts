@@ -4,6 +4,7 @@ import { Server } from 'socket.io';
 import app from './index.js';
 import dotenv from 'dotenv';
 import conversationModel from './model/conversation.model.js';
+import User from './model/user.model.js';
 import { isObjectId } from './utils/http.js';
 import { conversationRoom, userRoom } from './utils/chat.socket.js';
 
@@ -26,7 +27,7 @@ app.set('io', io);
  * The client sends it as `io(url, { auth: { token } })`; an "Authorization: Bearer" header or
  * the `smb-token` cookie also work. The user id always comes from the token, never from the client.
  */
-io.use((socket, next) => {
+io.use(async (socket, next) => {
     try {
         let token: string | undefined = socket.handshake.auth?.token;
 
@@ -43,11 +44,20 @@ io.use((socket, next) => {
 
         if (!token) return next(new Error('Authentication required'));
 
-        const payload = jwt.verify(token, process.env.JWT_SECRET!) as { id?: string; role?: string };
+        const payload = jwt.verify(token, process.env.JWT_SECRET!) as { id?: string; role?: string; iat?: number };
         if (!payload?.id) return next(new Error('Invalid token'));
 
+        // Same account checks as the REST middleware (isVerified): the account must still exist and be
+        // active, the token must be newer than the last password change, and the role comes from the DB.
+        const account = await User.findById(payload.id).select('passwordChangedAt role status').lean();
+        if (!account || account.status === 'inactive') return next(new Error('Account not available'));
+        if (account.passwordChangedAt && payload.iat !== undefined
+            && payload.iat < Math.floor(account.passwordChangedAt.getTime() / 1000)) {
+            return next(new Error('Password was changed. Please log in again.'));
+        }
+
         socket.data.userId = String(payload.id);
-        socket.data.role = payload.role;
+        socket.data.role = account.role;
         next();
     } catch {
         next(new Error('Invalid or expired token'));

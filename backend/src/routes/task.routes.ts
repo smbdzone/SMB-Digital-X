@@ -7,16 +7,21 @@ import {
     deleteTask,
     getEmployeeTasks
 } from "../controller/task.controller.js";
-import { isVerified } from "../middlewares/isVerified.js";
+import { isAllow, isVerified } from "../middlewares/isVerified.js";
 
 const router = express.Router();
+const adminOnly = isAllow(["admin"]);
 
-router.post("/", assignProject);
-router.get('/employee', isVerified, getEmployeeTasks)
-router.get("/project/:projectId", taskByProject);
+// Every task route requires a logged-in user.
+router.use(isVerified);
+
+router.post("/", adminOnly, assignProject);
+router.get('/employee', getEmployeeTasks)
+router.get("/project/:projectId", adminOnly, taskByProject);
+// Admin, or the employee the task is assigned to (checked inside the controller)
 router.get("/:id", getSingleTask);
 router.put("/:id", updateTask);
-router.delete("/:id", deleteTask);
+router.delete("/:id", adminOnly, deleteTask);
 
 
 export default router;

@@ -108,6 +108,23 @@ const buildSummary = (views: ReturnType<typeof toView>[], budget: number) => {
     }
 }
 
+// Employees see the work (title, dates, status, deliverables), never the money: no budget, payment share,
+// amount, currency or payment status.
+const FINANCE_FIELDS = ['paymentMode', 'paymentPercentage', 'paymentAmount', 'currency', 'paymentStatus', 'invoicedAt', 'paidAt'] as const
+
+const forViewer = (view: ReturnType<typeof toView>, auth: AuthUser) => {
+    if (isAdmin(auth)) return view
+    const out: Record<string, unknown> = { ...view }
+    for (const field of FINANCE_FIELDS) delete out[field]
+    return out
+}
+
+const summaryForViewer = (summary: ReturnType<typeof buildSummary>, auth: AuthUser) => {
+    if (isAdmin(auth)) return summary
+    const { total, pending, inProgress, completed, delayed, overdue, progressPercent } = summary
+    return { total, pending, inProgress, completed, delayed, overdue, progressPercent }
+}
+
 // All milestones of one project must never promise more than 100% of the budget.
 const assertWithinBudget = async (projectId: string | Types.ObjectId, budget: number, newPercent: number, excludeId?: string) => {
     const others = await Milestone.find({ projectId, ...(excludeId ? { _id: { $ne: excludeId } } : {}) })
@@ -192,9 +209,11 @@ export const getProjectMilestones = async (req: Request, res: Response): Promise
 
     res.status(200).json({
         success: true,
-        project: { id: project._id, name: project.name, status: project.status, budget: project.budget },
-        summary: buildSummary(views, project.budget),
-        data: views,
+        project: isAdmin(auth)
+            ? { id: project._id, name: project.name, status: project.status, budget: project.budget }
+            : { id: project._id, name: project.name, status: project.status },
+        summary: summaryForViewer(buildSummary(views, project.budget), auth),
+        data: views.map(v => forViewer(v, auth)),
     })
 }
 
@@ -205,7 +224,7 @@ export const getMilestone = async (req: Request, res: Response): Promise<void> =
     if (!milestone) throw notFound('Milestone not found')
 
     const project = await loadProject(String(milestone.projectId), auth)
-    res.status(200).json({ success: true, data: toView(milestone, project.budget) })
+    res.status(200).json({ success: true, data: forViewer(toView(milestone, project.budget), auth) })
 }
 
 // POST /api/milestones/project/:projectId  (admin)

@@ -134,6 +134,23 @@ export const getSalaries = (token: string, params: SalaryListParams = {}) =>
 export const getMySalaries = (token: string, month?: string) =>
     apiClient<ApiEnvelope<ISalary[]>>(`/salary/my${buildQuery({ month })}`, { token });
 
+// Salary slip PDF. Admin: any record (unpaid ones are watermarked DRAFT). Employee: own paid slips only.
+export const getSalarySlipPdf = (token: string, id: string) =>
+    apiClient<Blob>(`/salary/${id}/pdf?inline=true`, { token, responseType: 'blob' });
+
+/** PdfViewerModal target for a salary slip. Same file name as the emailed attachment. */
+export const salarySlipPdfTarget = (salary: ISalary, employeeName?: string) => {
+    const clean = (employeeName || 'Employee').replace(/[^a-zA-Z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'Employee';
+    const draft = salary.status === 'paid' ? '' : ' (draft)';
+    return {
+        _id: salary._id,
+        referenceNo: `${employeeName ? `${employeeName} - ` : ''}${salary.month}${draft}`,
+        title: 'Salary slip',
+        fileName: `Salary-Slip-${clean}-${salary.month}.pdf`,
+        load: getSalarySlipPdf,
+    };
+};
+
 export const getSalary = (token: string, id: string) =>
     apiClient<ApiEnvelope<ISalary>>(`/salary/${id}`, { token });
 

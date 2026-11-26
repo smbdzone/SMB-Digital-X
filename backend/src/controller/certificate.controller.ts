@@ -5,7 +5,7 @@ import { CertificateKind } from '../model/certificateTemplate.model.js'
 import User from '../model/user.model.js'
 import {
     IssueInput, buildCertificatePdf, createIssueContext, issueCertificate as issueOne,
-    listAvailableTypes, previewCertificate as previewOne, sendCertificateEmail, toTypeKey,
+    listAvailableTypes, previewCertificate as previewOne, previewCertificatePdf as previewOnePdf, sendCertificateEmail, toTypeKey,
 } from '../services/certificate.service.js'
 import {
     asDate, asText, badRequest, conflict, escapeRegex, forbidden, getAuth, isAdmin, isObjectId,
@@ -99,6 +99,22 @@ export const previewCertificate = async (req: Request, res: Response): Promise<v
 
     const ctx = await createIssueContext(auth.id, parseIssueInput(b))
     res.status(200).json({ success: true, data: await previewOne(ctx, b.employeeId) })
+}
+
+// POST /api/certificates/preview/pdf   (admin)
+// Same body as /preview. Returns the real PDF layout; nothing is saved and no reference number is used.
+export const previewCertificatePdf = async (req: Request, res: Response): Promise<void> => {
+    const auth = getAuth(req)
+    const b = req.body ?? {}
+    if (!isObjectId(b.employeeId)) throw badRequest('employeeId is required')
+
+    const ctx = await createIssueContext(auth.id, parseIssueInput(b))
+    const pdf = await previewOnePdf(ctx, b.employeeId)
+    res.setHeader('Content-Type', 'application/pdf')
+    res.setHeader('Content-Length', String(pdf.length))
+    res.setHeader('Cache-Control', 'private, no-store')
+    res.setHeader('Content-Disposition', 'inline; filename="preview.pdf"')
+    res.status(200).end(pdf)
 }
 
 // POST /api/certificates   (admin)

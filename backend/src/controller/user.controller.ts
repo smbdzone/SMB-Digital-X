@@ -3,10 +3,19 @@ import User from '../model/user.model.js';
 import jwt from 'jsonwebtoken'
 import { Types } from 'mongoose';
 import { resolveActiveCompanyId } from '../services/company.service.js';
-import { asAmount, asCurrency, asEmail, asText, badRequest, forbidden, getAuth, isAdmin, notFound, paramId } from '../utils/http.js';
+import { asAmount, asCurrency, asEmail, asLineItems, asText, badRequest, forbidden, getAuth, isAdmin, notFound, paramId } from '../utils/http.js';
 
 
-const generateToken = ({ id, role }: { id: string, role: string }): string => {
+type LineItem = { name: string; amount: number };
+
+/** Mongoose subdocuments -> plain { name, amount } objects (safe to compare and copy). */
+const plainLineItems = (items?: LineItem[] | null): LineItem[] =>
+    (items ?? []).map(a => ({ name: a.name, amount: a.amount }));
+
+const sameLineItems = (a: LineItem[], b: LineItem[]): boolean =>
+    a.length === b.length && a.every((item, i) => item.name === b[i].name && item.amount === b[i].amount);
+
+const generateToken =({ id, role }: { id: string, role: string }): string => {
     return jwt.sign({ id: id, role: role },
         process.env.JWT_SECRET!,
         { expiresIn: '30d' })
@@ -36,6 +45,7 @@ export const registerController = async (req: Request, res: Response): Promise<v
         salary: {
             amount: b.salaryAmount !== undefined ? asAmount(b.salaryAmount, 'salaryAmount') : undefined,
             currency: salaryCurrency !== undefined ? asCurrency(salaryCurrency, 'salaryCurrency') : 'AED',
+            allowances: b.salaryAllowances !== undefined ? asLineItems(b.salaryAllowances, 'salaryAllowances') : [],
             effectiveFrom: new Date(),
         },
         bankDetails: parseBankDetails(b.bankDetails),
@@ -54,9 +64,11 @@ export const loginController = async (
     res: Response
 ): Promise<void> => {
     try {
-        const { email, password } = req.body;
+        // req.body is undefined when no JSON body was sent; anything but two non-empty strings is a bad request.
+        const email = req.body?.email;
+        const password = req.body?.password;
 
-        if (!email || !password) {
+        if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
             res.status(400).json({
                 success: false,
                 message: "Email & password are required",
@@ -180,15 +192,20 @@ export const updateController = async (req: Request, res: Response): Promise<voi
             ? asCurrency(b.salaryCurrency ?? b.sallaryCurrency, 'salaryCurrency')
             : undefined;
 
+        const newAllowances = b.salaryAllowances !== undefined ? asLineItems(b.salaryAllowances, 'salaryAllowances') : undefined;
+        const currentAllowances = plainLineItems(user.salary?.allowances);
+
         const amountChanged = newAmount !== undefined && newAmount !== user.salary?.amount;
         const currencyChanged = newCurrency !== undefined && newCurrency !== user.salary?.currency;
+        const allowancesChanged = newAllowances !== undefined && !sameLineItems(newAllowances, currentAllowances);
 
-        if (amountChanged || currencyChanged) {
+        if (amountChanged || currencyChanged || allowancesChanged) {
             // Keep the old value so there is always a record of what the salary used to be.
             if (typeof user.salary?.amount === 'number') {
                 user.salaryHistory.push({
                     amount: user.salary.amount,
                     currency: user.salary.currency,
+                    allowances: currentAllowances,
                     effectiveFrom: user.salary.effectiveFrom,
                     changedBy: new Types.ObjectId(auth.id),
                     changedAt: new Date(),
@@ -196,9 +213,10 @@ export const updateController = async (req: Request, res: Response): Promise<voi
             }
             user.set('salary.amount', newAmount ?? user.salary?.amount);
             user.set('salary.currency', newCurrency ?? user.salary?.currency);
+            user.set('salary.allowances', newAllowances ?? currentAllowances);
             user.set('salary.effectiveFrom', new Date());
         }
-    } else if (b.status !== undefined || b.companyId !== undefined || b.salaryAmount !== undefined || b.salaryCurrency !== undefined) {
+    } else if (b.status !== undefined || b.companyId !== undefined || b.salaryAmount !== undefined || b.salaryCurrency !== undefined || b.salaryAllowances !== undefined) {
         throw forbidden('Only an admin can change status, company or salary');
     }
 
@@ -244,10 +262,12 @@ export const getUserController = async (req: Request, res: Response): Promise<vo
 
 export const getAllUserController = async (req: Request, res: Response): Promise<void> => {
     try {
-        const { id } = req.user;
+        const { id, role } = req.user;
+        // Employees use this list for chat only: they get names and contact fields, never salary or other HR data.
+        const fields = role === 'admin' ? "-password" : "_id name email position";
         const Users = await User.find({
             _id: { $ne: id }
-        }).select("-password").sort({ createdAt: -1 });
+        }).select(fields).sort({ createdAt: -1 });
 
         res.status(200).json({
             success: true,

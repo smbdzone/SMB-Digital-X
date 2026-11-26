@@ -28,6 +28,7 @@ import {
     issueCertificate,
     parseMissingVariables,
     previewCertificate,
+    previewCertificatePdf,
 } from '@/services/certificate.services'
 import { errorMessage } from '@/lib/utils'
 
@@ -73,7 +74,18 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     // Flow
     const [busy, setBusy] = useState(false)
     const [preview, setPreview] = useState<CertificatePreview | null>(null)
+    // Blob URL of the real PDF layout for the preview; null = show the plain text fallback.
+    const [previewPdfUrl, setPreviewPdfUrl] = useState<string | null>(null)
+
+    // Free the previous blob URL whenever it is replaced or cleared, and on unmount.
+    useEffect(() => () => { if (previewPdfUrl) URL.revokeObjectURL(previewPdfUrl) }, [previewPdfUrl])
+
     const [outcome, setOutcome] = useState<BulkOutcome | null>(null)
+
+    const closePreview = () => {
+        setPreview(null)
+        setPreviewPdfUrl(null)
+    }
 
     /* ------------------------------------------------------------ */
     /* Loading                                                       */
@@ -267,7 +279,13 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
 
         setBusy(true)
         try {
-            const res = await previewCertificate(token, { employeeId: selected[0], ...buildPayload() })
+            const payload = { employeeId: selected[0], ...buildPayload() }
+            const [res, pdf] = await Promise.all([
+                previewCertificate(token, payload),
+                // The PDF is the real design. If it fails, the plain text preview is shown instead.
+                previewCertificatePdf(token, payload).catch(() => null),
+            ])
+            setPreviewPdfUrl(pdf ? URL.createObjectURL(pdf) : null)
             if (res.data) setPreview(res.data)
         } catch (error) {
             handleFailure(error, 'Could not build the preview')
@@ -285,7 +303,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         }
 
         setBusy(true)
-        setPreview(null)
+        closePreview()
         try {
             if (selected.length === 1) {
                 const res = await issueCertificate(token, { employeeId: selected[0], ...buildPayload() })
@@ -559,8 +577,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
             {/* Preview */}
             <ModalBox
                 open={!!preview}
-                onClose={() => setPreview(null)}
-                size="2xl"
+                onClose={closePreview}
+                size="4xl"
                 title="Preview"
                 description={
                     preview
@@ -571,7 +589,7 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                     <>
                         <button
                             type="button"
-                            onClick={() => setPreview(null)}
+                            onClick={closePreview}
                             className="inline-flex h-11 items-center rounded-xl border border-charcoal/10 bg-white px-4 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03]"
                         >
                             Back to editing
@@ -584,14 +602,22 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
             >
                 {preview && (
                     <div className="space-y-4">
-                        <CertificateDocument
-                            kind={preview.kind}
-                            title={preview.title}
-                            body={preview.body}
-                            companyName={preview.companyName}
-                            issueDate={preview.issueDate}
-                            signatory={preview.signatory}
-                        />
+                        {previewPdfUrl ? (
+                            <iframe
+                                src={previewPdfUrl}
+                                title="Document preview"
+                                className="h-[70vh] w-full rounded-lg border border-charcoal/10"
+                            />
+                        ) : (
+                            <CertificateDocument
+                                kind={preview.kind}
+                                title={preview.title}
+                                body={preview.body}
+                                companyName={preview.companyName}
+                                issueDate={preview.issueDate}
+                                signatory={preview.signatory}
+                            />
+                        )}
                         {saveTemplate && preview.willRememberWording && (
                             <p className="rounded-xl bg-blue-50 px-4 py-3 text-xs text-blue-700">
                                 This wording is new, so it will be saved for &quot;{preview.typeLabel}&quot; and used next time.

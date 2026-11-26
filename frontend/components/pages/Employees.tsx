@@ -17,6 +17,8 @@ import SelectField from '../ui/SelectField'
 import { StatusBadge } from '@/components/ui/shared'
 import { errorMessage, formatCurrency } from '@/lib/utils'
 import { IoIosEyeOff, IoMdEye } from 'react-icons/io'
+import LineItemsEditor from '@/components/salary/LineItemsEditor'
+import type { LineItem } from '@/services/salary.services'
 
 interface EmployeeForm {
   name: string
@@ -24,13 +26,14 @@ interface EmployeeForm {
   password: string
   salaryAmount: string
   salaryCurrency: string
+  allowances: LineItem[]
   companyId: string
   position: string
   status: 'active' | 'inactive'
 }
 
 const emptyForm: EmployeeForm = {
-  name: '', email: '', password: '', salaryAmount: '', salaryCurrency: 'AED',
+  name: '', email: '', password: '', salaryAmount: '', salaryCurrency: 'AED', allowances: [],
   companyId: '', position: '', status: 'active',
 }
 
@@ -93,6 +96,7 @@ const Employees = () => {
         password: '',
         salaryAmount: String(employee.salary?.amount ?? ''),
         salaryCurrency: employee.salary?.currency || 'AED',
+        allowances: (employee.salary?.allowances ?? []).map(a => ({ name: a.name, amount: a.amount })),
         companyId: employee.companyId ? String(employee.companyId) : '',
         position: employee.position ?? '',
         status: (employee.status as 'active' | 'inactive') ?? 'active',
@@ -120,6 +124,13 @@ const Employees = () => {
     }
     if (!/^[A-Za-z]{3}$/.test(form.salaryCurrency.trim())) return toast.showError('Currency must be a 3-letter code, for example AED')
 
+    // Drop completely empty rows; every remaining row needs a name and a non-negative amount.
+    const allowances = form.allowances
+      .map(a => ({ name: a.name.trim(), amount: Number(a.amount) }))
+      .filter(a => a.name || a.amount)
+    if (allowances.some(a => !a.name)) return toast.showError('Give every allowance a name')
+    if (allowances.some(a => !Number.isFinite(a.amount) || a.amount < 0)) return toast.showError('Allowance amounts must be 0 or more')
+
     // only send bank fields that were filled in
     const filledBank = Object.fromEntries(Object.entries(bank).filter(([, v]) => v.trim() !== '').map(([k, v]) => [k, v.trim()])) as BankDetails
 
@@ -128,6 +139,7 @@ const Employees = () => {
       email: form.email.trim(),
       position: form.position.trim(),
       salaryCurrency: form.salaryCurrency.trim().toUpperCase(),
+      salaryAllowances: allowances,
       ...(form.salaryAmount !== '' ? { salaryAmount: Number(form.salaryAmount) } : {}),
       ...(form.companyId ? { companyId: form.companyId } : {}),
       ...(form.password.trim() ? { password: form.password } : {}),
@@ -264,6 +276,16 @@ const Employees = () => {
           <div className='grid grid-cols-[1fr_96px] gap-3'>
             <Input label='Salary amount' name='salaryAmount' type='number' min={0} value={form.salaryAmount} handleChange={handleChangeForm} placeholder='Monthly salary' />
             <Input label='Currency' name='salaryCurrency' maxLength={3} value={form.salaryCurrency} handleChange={e => setForm(p => ({ ...p, salaryCurrency: e.target.value.toUpperCase() }))} />
+          </div>
+          <div className='rounded-xl border border-charcoal/10 p-4'>
+            <LineItemsEditor
+              label='Monthly allowances'
+              addLabel='Add allowance'
+              namePlaceholder='e.g. Housing, Transport'
+              items={form.allowances}
+              onChange={items => setForm(p => ({ ...p, allowances: items }))}
+            />
+            <p className='mt-2 text-xs text-charcoal/45'>Added to every new monthly salary record. Months already generated are not changed.</p>
           </div>
           {editEmployeeId && (
             <SelectField

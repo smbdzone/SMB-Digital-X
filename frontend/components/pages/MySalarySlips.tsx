@@ -3,16 +3,15 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FiFileText } from 'react-icons/fi';
 
-import ModalBox from '../ui/ModalBox';
-import SalaryDetails from '../salary/SalaryDetails';
+import PdfViewerModal from '../certificates/PdfViewerModal';
 import { EmptyState } from '@/components/ui/shared';
-import { getMySalaries, ISalary, salaryCompanyLogo, salaryCompanyName } from '@/services/salary.services';
+import { getMySalaries, ISalary, salaryCompanyLogo, salaryCompanyName, salarySlipPdfTarget } from '@/services/salary.services';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { errorMessage, formatCurrency, formatDate, formatMonthLabel } from '@/lib/utils';
 
 const MySalarySlips = () => {
-    const { token } = useAuth();
+    const { token, user } = useAuth();
     const toast = useToast();
 
     const [month, setMonth] = useState('');
@@ -95,9 +94,10 @@ const MySalarySlips = () => {
                 </div>
             )}
 
-            <ModalBox open={!!selected} onClose={() => setSelected(null)} size="xl" title="Salary slip">
-                {selected && <SalaryDetails salary={selected} />}
-            </ModalBox>
+            <PdfViewerModal
+                target={selected ? salarySlipPdfTarget(selected, user?.name) : null}
+                onClose={() => setSelected(null)}
+            />
         </div>
     );
 };

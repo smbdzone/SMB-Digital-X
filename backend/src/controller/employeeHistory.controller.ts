@@ -159,6 +159,7 @@ export const createHistoryEntry = async (req: Request, res: Response): Promise<v
                 employee.salaryHistory.push({
                     amount: employee.salary.amount,
                     currency: employee.salary.currency,
+                    allowances: (employee.salary.allowances ?? []).map(a => ({ name: a.name, amount: a.amount })),
                     effectiveFrom: employee.salary.effectiveFrom,
                     changedBy: new Types.ObjectId(auth.id),
                     changedAt: new Date(),

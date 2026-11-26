@@ -353,6 +353,25 @@ export const previewCertificate = async (ctx: IssueContext, employeeId: string) 
     }
 }
 
+/**
+ * The real PDF layout for a preview. Nothing is saved, no wording is remembered and no reference
+ * number is used up: the PDF shows "<CODE>-CRT|LTR-<year>-PREVIEW" instead.
+ */
+export const previewCertificatePdf = async (ctx: IssueContext, employeeId: string): Promise<Buffer> => {
+    const p = await prepare(ctx, employeeId)
+    const year = new Date(p.issueDate).getUTCFullYear()
+    return generateCertificatePdf({
+        kind: p.content.kind,
+        company: pdfCompany(p.company, p.company.name),
+        referenceNo: `${String(p.company.code ?? '').toUpperCase()}-${p.content.kind === 'certificate' ? 'CRT' : 'LTR'}-${year}-PREVIEW`,
+        title: p.title,
+        body: p.body,
+        employeeName: p.employee.name,
+        issueDate: p.issueDate,
+        signatory: p.signatory ?? {},
+    })
+}
+
 const nextReference = async (company: ICompany, kind: CertificateKind, issueDate: Date): Promise<string> => {
     const year = issueDate.getUTCFullYear()
     const seq = await nextSequence(`cert:${company.code}:${kind}:${year}`)
@@ -412,6 +431,18 @@ export const issueCertificate = async (ctx: IssueContext, employeeId: string): P
 /* PDF + email                                                         */
 /* ------------------------------------------------------------------ */
 
+/** Company branding for the certificate PDF (shared by issued documents and previews). */
+const pdfCompany = (company: ICompany | null | undefined, fallbackName: string) => ({
+    name: company?.name ?? fallbackName,
+    legalName: company?.legalName,
+    logoUrl: resolveLogoUrl(company?.logo),
+    brandColor: company?.brandColor,
+    address: company?.address,
+    phone: company?.phone,
+    website: company?.website,
+    footerNote: company?.email?.footerNote,
+})
+
 export const buildCertificatePdf = async (cert: ICertificate, companyDoc?: ICompany | null): Promise<{ pdf: Buffer; fileName: string }> => {
     const company = companyDoc !== undefined
         ? companyDoc
@@ -419,16 +450,7 @@ export const buildCertificatePdf = async (cert: ICertificate, companyDoc?: IComp
 
     const pdf = await generateCertificatePdf({
         kind: cert.kind,
-        company: {
-            name: company?.name ?? cert.companyName,
-            legalName: company?.legalName,
-            logoUrl: resolveLogoUrl(company?.logo),
-            brandColor: company?.brandColor,
-            address: company?.address,
-            phone: company?.phone,
-            website: company?.website,
-            footerNote: company?.email?.footerNote,
-        },
+        company: pdfCompany(company, cert.companyName),
         referenceNo: cert.referenceNo,
         title: cert.title,
         body: cert.body,

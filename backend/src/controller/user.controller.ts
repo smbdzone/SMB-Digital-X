@@ -64,9 +64,11 @@ export const loginController = async (
     res: Response
 ): Promise<void> => {
     try {
-        const { email, password } = req.body;
+        // req.body is undefined when no JSON body was sent; anything but two non-empty strings is a bad request.
+        const email = req.body?.email;
+        const password = req.body?.password;
 
-        if (!email || !password) {
+        if (typeof email !== 'string' || typeof password !== 'string' || !email.trim() || !password) {
             res.status(400).json({
                 success: false,
                 message: "Email & password are required",

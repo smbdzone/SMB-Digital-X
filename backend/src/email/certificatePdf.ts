@@ -30,9 +30,9 @@ export interface CertificatePdfData {
     signatory: { name?: string; title?: string };
     /**
      * image: the owner's signature, ONLY for the emailed copy (kept in memory, never stored).
-     * signedByName + signedAt: every later copy shows "Digitally signed by <name> on <date>" instead.
+     * signedAt: every later copy shows "Digitally signed by <the signatory printed on it> on <date>" instead.
      */
-    signature?: { image?: Buffer; signedByName?: string; signedAt?: Date };
+    signature?: { image?: Buffer; signedAt?: Date };
     revoked?: boolean;
 }
 
@@ -82,13 +82,13 @@ export const certificateFileName = (referenceNo: string): string =>
  * else "Digitally signed by <name> on <date>", else nothing (room for a wet signature).
  */
 const drawSignatureMark = (
-    doc: PDFKit.PDFDocument, signature: CertificatePdfData['signature'],
+    doc: PDFKit.PDFDocument, signature: CertificatePdfData['signature'], printedName: string,
     x: number, y: number, width: number, height: number, align: 'left' | 'center',
 ) => {
     if (signature?.image) {
         doc.image(signature.image, x, y, { fit: [width, height], valign: 'bottom', ...(align === 'center' ? { align: 'center' as const } : {}) });
-    } else if (signature?.signedAt && signature.signedByName) {
-        const text = `Digitally signed by ${pdfText(signature.signedByName)} on ${formatDate(signature.signedAt)}`;
+    } else if (signature?.signedAt) {
+        const text = `Digitally signed by ${pdfText(printedName)} on ${formatDate(signature.signedAt)}`;
         doc.font('Helvetica-Oblique').fontSize(8).fillColor('#475569');
         const h = doc.heightOfString(text, { width, align });
         doc.text(text, x, y + height - h, { width, align });
@@ -238,7 +238,7 @@ const drawLetter = (doc: PDFKit.PDFDocument, data: CertificatePdfData, color: st
     doc.y += 30;
     const signTop = doc.y;
     const { signatory } = data;
-    drawSignatureMark(doc, data.signature, left, signTop - 14, 200, 42, 'left');
+    drawSignatureMark(doc, data.signature, signatory.name || company.name, left, signTop - 14, 200, 42, 'left');
     const lineY = signTop + 30;
     doc.moveTo(left, lineY).lineTo(left + 200, lineY).lineWidth(0.8).strokeColor('#94a3b8').stroke();
     doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text(pdfText(signatory.name || company.name), left, lineY + 5, { width: 260 });
@@ -327,7 +327,7 @@ const drawCertificate = (doc: PDFKit.PDFDocument, data: CertificatePdfData, colo
 
     // signature
     const sigX = W - 290;
-    drawSignatureMark(doc, data.signature, sigX, rowY - 46, 220, 52, 'center');
+    drawSignatureMark(doc, data.signature, signatory.name || company.name, sigX, rowY - 46, 220, 52, 'center');
     doc.moveTo(sigX, rowY + 10).lineTo(sigX + 220, rowY + 10).lineWidth(0.8).strokeColor('#94a3b8').stroke();
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a')
         .text(pdfText(signatory.name || company.name), sigX, rowY + 14, { width: 220, align: 'center', lineBreak: false, ellipsis: true });

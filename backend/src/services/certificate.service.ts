@@ -474,13 +474,11 @@ export const buildCertificatePdf = async (
         ? companyDoc
         : await Company.findById(cert.companyId).lean() as unknown as ICompany | null
 
-    let signature: { image?: Buffer; signedByName?: string; signedAt?: Date } | undefined
-    if (signatureImage) {
-        signature = { image: signatureImage }
-    } else if (cert.signedAt && cert.signedBy) {
-        const signer = await User.findById(cert.signedBy).select('name').lean()
-        signature = { signedByName: signer?.name || cert.signatory?.name || 'the owner', signedAt: cert.signedAt }
-    }
+    // "Digitally signed by" uses the signatory name printed on this document (the PDF code picks it), not the
+    // signing user's account name. signedBy keeps the user ID for the record.
+    const signature = signatureImage
+        ? { image: signatureImage }
+        : cert.signedAt && cert.signedBy ? { signedAt: cert.signedAt } : undefined
 
     const pdf = await generateCertificatePdf({
         kind: cert.kind,

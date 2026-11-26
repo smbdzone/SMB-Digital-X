@@ -20,7 +20,7 @@ export interface LetterheadLetterData {
     signatory: { name?: string; title?: string }
     signature?: {
         image?: Buffer             // only for the emailed copy; never stored
-        signedByName?: string      // in-app copies: "Digitally signed by <name> on <date>"
+        // in-app copies: "Digitally signed by <the signatory printed on this letter> on <date>"
         signedAt?: Date
     }
 }
@@ -320,8 +320,8 @@ export const drawLetterheadLetter = (doc: PDFKit.PDFDocument, lh: Letterhead, da
     const sig = data.signature
     if (sig?.image) {
         doc.image(sig.image, s.x, boxTop + 2, { fit: [s.width, s.boxHeight - 4], valign: 'bottom' })
-    } else if (sig?.signedAt && sig.signedByName) {
-        const line = `Digitally signed by ${clean(sig.signedByName)} on ${formatLetterDate(sig.signedAt, 'MMMM d, yyyy')}`
+    } else if (sig?.signedAt) {
+        const line = `Digitally signed by ${signatoryName} on ${formatLetterDate(sig.signedAt, 'MMMM d, yyyy')}`
         useStyle(doc, s.signedLine)
         const height = doc.heightOfString(line, { width: s.width })
         doc.fillColor(s.signedLine.color).fillOpacity(1)

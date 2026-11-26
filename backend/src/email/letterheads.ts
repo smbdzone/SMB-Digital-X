@@ -181,8 +181,6 @@ const axisAura: Letterhead = {
 /* SMB Axis Proptech                                                   */
 /* ------------------------------------------------------------------ */
 
-const proptechShadow = { dx: 0.9, dy: 0.9, color: '#000000', opacity: 0.22 }
-
 const smbProptech: Letterhead = {
     code: 'smb-proptech',
     first: {
@@ -209,11 +207,12 @@ const smbProptech: Letterhead = {
         blockBottom: 662,
     },
 
+    // Only the title keeps the design's drop shadow; on small text it read as doubled text.
     title: { y: 143.0, centerX: 296.8, uppercase: true, style: { font: 'ArchivoBlack-Regular', size: 24, color: '#000000', shadow: { dx: 1.2, dy: 1.6, color: '#000000', opacity: 0.25 } } },
-    date: { y: 191.2, x: 59.5, align: 'left', format: 'd MMM, yyyy', style: { font: 'Poppins-SemiBold', size: 11.9, color: '#000000', shadow: proptechShadow } },
+    date: { y: 191.2, x: 59.5, align: 'left', format: 'd MMM, yyyy', style: { font: 'Poppins-SemiBold', size: 11.9, color: '#000000' } },
     // The design has the date on the left with the salutation right under it, so the reference sits on the date row, right-aligned.
     reference: { y: 194, x: 535.7, align: 'right', style: { font: 'Poppins-Regular', size: 8, color: '#6b7280' } },
-    subject: { y: 208.3, prefix: 'Subject: ', bodyTop: 232.5, style: { font: 'Poppins-SemiBold', size: 11.9, color: '#000000', shadow: proptechShadow } },
+    subject: { y: 208.3, prefix: 'Subject: ', bodyTop: 232.5, style: { font: 'Poppins-SemiBold', size: 11.9, color: '#000000' } },
     body: {
         top: 208.3, left: 59.5, right: 537.6,
         style: { font: 'Poppins-Regular', size: 10.8, color: '#222222' },
@@ -222,25 +221,25 @@ const smbProptech: Letterhead = {
         blankLine: 24,
         align: 'left',
         companyNameColor: '#3199e9',
-        salutation: { lineHeight: 17.4, style: { font: 'Poppins-SemiBold', size: 12.5, color: '#000000', shadow: proptechShadow } },
+        salutation: { lineHeight: 17.4, style: { font: 'Poppins-SemiBold', size: 12.5, color: '#000000' } },
         bullet: { indent: 18.7, radius: 1.9, dx: 7.9, dy: 7.6, color: '#222222' },
     },
     closing: {
         gapBefore: 24,
         lines: [
             { text: 'Best Regards,', height: 14, style: { font: 'Poppins-Bold', size: 10.8, color: '#000000' } },
-            { text: 'Team {{company}}', height: 13.5, style: { font: 'Poppins-Regular', size: 9.7, color: '#222222', shadow: proptechShadow } },
+            { text: 'Team {{company}}', height: 13.5, style: { font: 'Poppins-Regular', size: 9.7, color: '#222222' } },
         ],
     },
     signature: {
         align: 'left', x: 59.5, width: 220, boxHeight: 78.8,
-        name: { height: 19.4, style: { font: 'Poppins-Bold', size: 15.1, color: '#000000', shadow: proptechShadow } },
-        title: { height: 13.6, style: { font: 'Poppins-Regular', size: 9.7, color: '#222222', shadow: proptechShadow } },
+        name: { height: 19.4, style: { font: 'Poppins-Bold', size: 15.1, color: '#000000' } },
+        title: { height: 13.6, style: { font: 'Poppins-Regular', size: 9.7, color: '#222222' } },
         signedLine: { font: 'Poppins-Regular', size: 8.5, color: '#4b5563' },
     },
     contact: {
         x: 535.7, ys: [742.1, 755.6, 769.1], underlineWebsite: true,
-        style: { font: 'Poppins-SemiBold', size: 10, color: '#fcf6f6', characterSpacing: 1, shadow: { dx: 0.8, dy: 0.8, color: '#000000', opacity: 0.3 } },
+        style: { font: 'Poppins-SemiBold', size: 10, color: '#fcf6f6', characterSpacing: 1 },
     },
 }
 

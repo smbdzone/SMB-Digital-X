@@ -257,7 +257,8 @@ const smbDigitalZone: Letterhead = {
             { type: 'image', file: 'logo.png', x: 191.2, y: -2.1, width: 203.4, height: 203.4 },
         ],
         top: 0,
-        bodyBottom: 735,      // the bottom-left corner starts at y 760 at the left margin
+        // The bottom-left corner starts at y 760 at the left margin (783 at x 80): keep body text well clear of it.
+        bodyBottom: 700,
         blockBottom: 785,
     },
     // Continuation: background, watermark and the corner shapes, without the navy band and logo.
@@ -268,7 +269,7 @@ const smbDigitalZone: Letterhead = {
             { type: 'shapes', file: 'shapes.json', roles: ['decoration'] },
         ],
         top: 96,              // the top-right corner reaches y 80 at the right margin
-        bodyBottom: 735,
+        bodyBottom: 700,      // same clearance from the bottom-left corner as page 1
         blockBottom: 785,
     },
 

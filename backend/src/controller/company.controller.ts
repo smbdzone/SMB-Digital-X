@@ -1,10 +1,15 @@
 import { Request, Response } from 'express'
 import Company from '../model/company.model.js'
 import { withLogoUrl } from '../services/company.service.js'
+import { isLetterheadDesign, LETTERHEAD_DESIGNS, letterheadDesignFor } from '../utils/letterheadDesigns.js'
 import { AppError, asCurrency, asEmail, asText, badRequest, getAuth, isAdmin, notFound, paramId } from '../utils/http.js'
 import { uploadToCloudinary } from '../utils/cloudinary.js'
 
 const HEX = /^#[0-9a-fA-F]{6}$/
+
+// What the app shows: the logo URL, and the letterhead design actually used for this company's letters.
+const present = <T extends { logo?: string; letterhead?: string | null; code?: string }>(c: T) =>
+    ({ ...withLogoUrl(c), letterheadDesign: letterheadDesignFor(c) })
 
 // Builds a validated field set. On update only the fields that were sent are included.
 const buildCompanyFields = (b: any, mode: 'create' | 'update') => {
@@ -22,6 +27,12 @@ const buildCompanyFields = (b: any, mode: 'create' | 'update') => {
 
     for (const key of ['legalName', 'address', 'phone', 'website'] as const) {
         if (b[key] !== undefined) f[key] = asText(b[key], key, { max: 300 }) ?? ''
+    }
+    if (b.letterhead !== undefined) {
+        // '' or null = no choice: use the design with the same code as the company, else plain.
+        if (b.letterhead === '' || b.letterhead === null) f.letterhead = null
+        else if (isLetterheadDesign(b.letterhead)) f.letterhead = b.letterhead
+        else throw badRequest(`letterhead must be one of: ${LETTERHEAD_DESIGNS.map(d => d.value).join(', ')}`)
     }
     if (b.logo !== undefined) f.logo = asText(b.logo, 'logo', { max: 500 }) ?? ''
     if (b.brandColor !== undefined) {
@@ -61,14 +72,14 @@ export const listCompanies = async (req: Request, res: Response): Promise<void> 
     const includeInactive = isAdmin(auth) && req.query.all === 'true'
 
     const companies = await Company.find(includeInactive ? {} : { isActive: true }).sort({ name: 1 }).lean()
-    res.status(200).json({ success: true, data: companies.map(withLogoUrl) })
+    res.status(200).json({ success: true, data: companies.map(present) })
 }
 
 // GET /api/companies/:id
 export const getCompany = async (req: Request, res: Response): Promise<void> => {
     const company = await Company.findById(paramId(req)).lean()
     if (!company) throw notFound('Company not found')
-    res.status(200).json({ success: true, data: withLogoUrl(company) })
+    res.status(200).json({ success: true, data: present(company) })
 }
 
 // POST /api/companies (admin)
@@ -84,7 +95,7 @@ export const createCompany = async (req: Request, res: Response): Promise<void> 
     }
     const fields = buildCompanyFields(req.body ? { ...req.body, logo: file ? upload.url : req.body.logo } : {}, 'create')
     const company = await Company.create(fields)
-    res.status(201).json({ success: true, message: 'Company created', data: withLogoUrl(company.toObject()) })
+    res.status(201).json({ success: true, message: 'Company created', data: present(company.toObject()) })
 }
 
 // PATCH /api/companies/:id (admin) - use { isActive: false } to retire a company (history keeps working)
@@ -104,7 +115,7 @@ export const updateCompany = async (req: Request, res: Response): Promise<void> 
 
     const company = await Company.findByIdAndUpdate(paramId(req), { $set: fields }, { new: true, runValidators: true }).lean()
     if (!company) throw notFound('Company not found')
-    res.status(200).json({ success: true, message: 'Company updated', data: withLogoUrl(company) })
+    res.status(200).json({ success: true, message: 'Company updated', data: present(company) })
 }
 
 export const deleteCompany = async (req: Request, res: Response): Promise<void> => {

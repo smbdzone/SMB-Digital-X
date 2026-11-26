@@ -15,6 +15,7 @@ import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { useCompanies } from '@/hooks/useCompanies'
 import { fetchAllEmployees, type User } from '@/services/auth.services'
+import { letterheadLabel } from '@/services/company.services'
 import {
     BulkIssueResult,
     CertificateKind,
@@ -167,6 +168,19 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     ]
 
     const companyOptions = companies.map(c => ({ value: c._id, label: c.name }))
+
+    // Each company's letterhead is fixed (company settings); this only shows which one the letter will get.
+    const letterheadLine = (() => {
+        if (kind === 'certificate') return 'Design: the certificate layout (landscape).'
+        const ids = companyId
+            ? [companyId]
+            : [...new Set(selected.map(id => employees?.find(e => e._id === id)?.companyId).filter((id): id is string => !!id))]
+        if (ids.length === 0) return "Letterhead: the design of the employee's own company."
+        const labels = [...new Set(ids.map(id => letterheadLabel(companies.find(c => c._id === id)?.letterheadDesign)))]
+        return ids.length === 1
+            ? `Letterhead: ${labels[0]}`
+            : `Letterhead: each employee's own company design (${labels.join(', ')}).`
+    })()
 
     const subjectUsed = kind === 'letter' ? subject : ''
     useEffect(() => {
@@ -454,6 +468,9 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                                 <p className="mt-1.5 text-xs text-charcoal/50">Leave empty for today.</p>
                             </div>
                         </div>
+                        <p data-testid="letterhead-line" className="mt-4 rounded-lg bg-surface px-3 py-2 text-xs text-charcoal/70">
+                            {letterheadLine}
+                        </p>
                     </section>
 
                     {typeSel && (

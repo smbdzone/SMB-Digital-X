@@ -6,16 +6,18 @@ import { FiDelete, FiEdit, FiPlus, FiTrash2 } from 'react-icons/fi';
 import ModalBox from '../ui/ModalBox';
 import ButtonEmerald from '../ui/ButtonEmerald';
 import Input from '../ui/Input';
+import SelectField from '../ui/SelectField';
 import { TextAreaField } from '@/components/ui/shared';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useCompanies } from '@/hooks/useCompanies';
-import { Company, CompanyPayload, createCompany, deleteCompany, updateCompany } from '@/services/company.services';
+import { Company, CompanyPayload, LETTERHEAD_DESIGNS, createCompany, letterheadLabel, deleteCompany, updateCompany } from '@/services/company.services';
 import { errorMessage } from '@/lib/utils';
 
 interface CompanyForm {
     name: string;
     code: string;
+    letterhead: string;   // '' = the design with the same code, else Plain
     legalName: string;
     logo: string;
     brandColor: string;
@@ -34,13 +36,13 @@ interface CompanyForm {
 }
 
 const emptyForm: CompanyForm = {
-    name: '', code: '', legalName: '', logo: '', brandColor: '#0136B0', address: '', phone: '', website: '',
+    name: '', code: '', letterhead: '', legalName: '', logo: '', brandColor: '#0136B0', address: '', phone: '', website: '',
     currency: 'AED', isActive: true, fromName: '', fromEmail: '', replyTo: '', footerNote: '',
     signatoryName: '', signatoryTitle: '', signature: '',
 };
 
 const toForm = (c: Company): CompanyForm => ({
-    name: c.name, code: c.code, legalName: c.legalName ?? '', logo: c.logo ?? '', brandColor: c.brandColor || '#0136B0',
+    name: c.name, code: c.code, letterhead: c.letterhead ?? c.letterheadDesign ?? '', legalName: c.legalName ?? '', logo: c.logo ?? '', brandColor: c.brandColor || '#0136B0',
     address: c.address ?? '', phone: c.phone ?? '', website: c.website ?? '', currency: c.currency || 'AED', isActive: c.isActive,
     fromName: c.email?.fromName ?? '', fromEmail: c.email?.fromEmail ?? '', replyTo: c.email?.replyTo ?? '', footerNote: c.email?.footerNote ?? '',
     signatoryName: c.signatory?.name ?? '', signatoryTitle: c.signatory?.title ?? '', signature: c.signatory?.signature ?? '',
@@ -113,6 +115,7 @@ const Companies = () => {
         formData.append('email[replyTo]', form.replyTo.trim());
         formData.append('email[footerNote]', form.footerNote.trim());
         formData.append('code', String(form.code))
+        formData.append('letterhead', form.letterhead)
 
         formData.append('signatory[name]', form.signatoryName.trim());
         formData.append('signatory[title]', form.signatoryTitle.trim());
@@ -221,7 +224,7 @@ const Companies = () => {
                                     )}
                                     <div className="min-w-0">
                                         <p className="truncate font-heading text-sm font-bold text-charcoal">{company.name}</p>
-                                        <p className="truncate text-xs text-charcoal/45">{company.code}</p>
+                                        <p className="truncate text-xs text-charcoal/45">{company.code} · Letterhead: {letterheadLabel(company.letterheadDesign)}</p>
                                     </div>
                                 </div>
                                 <span className="mt-1 size-4 shrink-0 rounded-full border border-black/10" style={{ background: company.brandColor }} title={company.brandColor} />
@@ -268,13 +271,24 @@ const Companies = () => {
                     <Section title="Company">
                         <div className="grid gap-4 sm:grid-cols-2">
                             <Input label="Name" required value={form.name} handleChange={text('name')} placeholder="Shown on slips and as sender name" />
-                            <Input label="Code" required={!editing} disabled={!!editing} value={form.code} handleChange={e => set('code', e.target.value.toLowerCase())} placeholder="smb-proptech" helperText={editing ? 'The code cannot be changed.' : 'Lowercase letters, numbers and dashes'} />
+                            <Input label="Code" required={!editing} disabled={!!editing} value={form.code} handleChange={e => set('code', e.target.value.toLowerCase())} placeholder="smb-proptech" helperText={editing ? `Read-only. Used in reference numbers such as ${form.code.toUpperCase()}-LTR-2026-0001.` : 'Lowercase letters, numbers and dashes. It cannot be changed later.'} />
                             <Input label="Legal name" value={form.legalName} handleChange={text('legalName')} />
                             <Input label="Default currency" maxLength={3} value={form.currency} handleChange={e => set('currency', e.target.value.toUpperCase())} />
                             <Input label="Address" value={form.address} handleChange={text('address')} containerClassName="sm:col-span-2" />
                             <Input label="Phone" value={form.phone} handleChange={text('phone')} />
                             <Input label="Website" value={form.website} handleChange={text('website')} placeholder="https://" />
                         </div>
+                    </Section>
+
+                    <Section title="Letters" hint="Every letter from this company uses this design; only the text changes. Certificates use the certificate layout.">
+                        <SelectField
+                            label="Letterhead design"
+                            name="letterhead"
+                            value={form.letterhead}
+                            onChange={e => set('letterhead', e.target.value)}
+                            options={LETTERHEAD_DESIGNS.map(d => ({ value: d.value, label: d.label }))}
+                            placeholder="Default: the design with the same code, else Plain"
+                        />
                     </Section>
 
                     <Section title="Branding" hint="Email apps load the logo from the internet, so use a public URL. A path such as /images/axis-aura.png is resolved against your frontend URL.">

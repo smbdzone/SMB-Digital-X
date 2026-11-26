@@ -448,6 +448,7 @@ export const issueCertificate = async (ctx: IssueContext, employeeId: string): P
 /** Company branding for the certificate PDF (shared by issued documents and previews). */
 const pdfCompany = (company: ICompany | null | undefined, fallbackName: string) => ({
     code: company?.code,
+    letterhead: company?.letterhead ?? undefined,
     name: company?.name ?? fallbackName,
     legalName: company?.legalName,
     logoUrl: resolveLogoUrl(company?.logo),

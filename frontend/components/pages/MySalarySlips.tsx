@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useCallback, useEffect, useState } from 'react';
+import BankDetailsPanel from './BankDetailsPanel';
 import { FiFileText } from 'react-icons/fi';
 
 import PdfViewerModal from '../certificates/PdfViewerModal';
@@ -39,6 +40,7 @@ const MySalarySlips = () => {
 
     return (
         <div className="py-4 lg:py-6">
+            <BankDetailsPanel />
             <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                     <h4 className="text-md font-bold font-heading sm:text-xl">My salary slips</h4>

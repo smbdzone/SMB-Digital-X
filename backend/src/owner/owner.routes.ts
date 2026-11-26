@@ -15,6 +15,7 @@ import { fingerprint, importPublicKey } from './signing.js'
 import { jsonBody, owner, requireOwner } from './ownerHttp.js'
 import integrityRoutes from './integrity.routes.js'
 import payrollRoutes from './payroll.routes.js'
+import peopleRoutes from './people.routes.js'
 
 /*
  * Owner Console API (/api/owner). Called only by the Owner Console: one local HTML file on the owner's laptop,
@@ -231,5 +232,6 @@ router.get('/log', requireOwner, async (_req, res) => {
 // Owner actions (payroll, people, salary history, integrity, adopt) live in their own route files.
 router.use(integrityRoutes)
 router.use(payrollRoutes)
+router.use(peopleRoutes)
 
 export default router

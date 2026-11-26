@@ -160,3 +160,20 @@ export const resetPassword = (payload: ResetPasswordPayload): Promise<ApiEnvelop
         body: JSON.stringify(payload),
     })
 }
+
+export interface MyBankDetails {
+    current: { method: string; bankName: string; holderName: string; accountNumber: string; iban: string };
+    pending: { requestedAt: string; bankName: string; holderName: string; iban: string; accountNumber: string } | null;
+    lastDecision: { status: 'approved' | 'rejected'; decidedAt: string } | null;
+}
+
+/** Own bank details (account number and IBAN shortened) and any pending change request. */
+export const getMyBankDetails = (token: string): Promise<ApiEnvelope<MyBankDetails>> =>
+    apiClient<ApiEnvelope<MyBankDetails>>('/auth/bank-details', { token });
+
+/** Ask for new bank details; the current ones stay in use until the owner approves the request. */
+export const requestBankDetailsChange = (
+    token: string,
+    payload: { method?: string; bankName?: string; holderName: string; accountNumber?: string; iban?: string }
+): Promise<ApiEnvelope> =>
+    apiClient<ApiEnvelope>('/auth/bank-details/request', { method: 'POST', token, body: JSON.stringify(payload) });

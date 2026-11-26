@@ -53,3 +53,19 @@ export const generatePasswordChangedEmail = (name: string): { subject: string; h
 
     return { subject: `Your ${app} password was changed`, html, text }
 }
+
+/** New account (created in the Owner Console, without a password): how to set one. */
+export const generateWelcomeEmail = (name: string, email: string, link: string): { subject: string; html: string; text: string } => {
+    const app = APP_NAME()
+    const text = [
+        `Hi ${name},`,
+        '',
+        `An account was created for you on ${app}.`,
+        `To choose your password, open ${link}, enter your email (${email}) and follow the steps.`,
+    ].join('\n')
+    const html = wrap(`
+      <p style="margin:0 0 16px;">Hi ${escapeHtml(name)},</p>
+      <p style="margin:0 0 16px;">An account was created for you on ${escapeHtml(app)}.</p>
+      <p style="margin:0 0 16px;">To choose your password, open <a href="${escapeHtml(link)}">${escapeHtml(link)}</a>, enter your email (<strong>${escapeHtml(email)}</strong>) and follow the steps.</p>`)
+    return { subject: `Your ${app} account`, html, text }
+}

@@ -28,7 +28,8 @@ router.get('/payroll', requireOwner, async (req, res) => {
     const rows = await Salary.find({ month }).sort({ _id: 1 }).lean()
     const people = await User.find({ _id: { $in: rows.map(r => r.employeeId) } }).select('name email +bankDetails').lean()
     const byId = new Map(people.map(p => [String(p._id), p]))
-    const companies = new Map((await Company.find().select('name').lean()).map(c => [String(c._id), c.name]))
+    const companyList = await Company.find().select('name isActive').sort({ name: 1 }).lean()
+    const companies = new Map(companyList.map(c => [String(c._id), c.name]))
     const otherPending = await Salary.countDocuments({ status: 'pending', month: { $ne: month } })
     const data = rows.map(s => {
         const p = byId.get(String(s.employeeId))
@@ -39,7 +40,7 @@ router.get('/payroll', requireOwner, async (req, res) => {
         }
     })
     await appendOwnerLog({ action: 'read.payroll', recordId: month, request: owner(res).request, result: { count: data.length } })
-    res.json({ success: true, data: { month, salaries: data, otherPending } })
+    res.json({ success: true, data: { month, salaries: data, otherPending, companies: companyList.map(c => ({ id: String(c._id), name: c.name, isActive: c.isActive })) } })
 })
 
 router.post('/payroll/run', requireOwner, async (req, res) => {

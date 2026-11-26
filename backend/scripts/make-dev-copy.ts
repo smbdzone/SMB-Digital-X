@@ -288,6 +288,18 @@ const transforms: Record<string, (d: Doc) => Doc | null> = {
     },
     // Not copied: device push endpoints are personal and useless on a dev copy.
     pushsubscriptions: () => null,
+    // Not copied: the Owner Console's own data. The history keeps the exact signed bodies (real amounts and IBANs
+    // inside JSON text, which the scrubbing below cannot rewrite); the keys, nonces and reports belong to the owner.
+    // On the copy, owner records simply show as "not adopted / not signed": that is expected.
+    ownerlogs: () => null,
+    ownerkeys: () => null,
+    ownernonces: () => null,
+    ownerreports: () => null,
+    bankchangerequests: d => {
+        const who = personOf(d.employeeId)
+        if (d.requested) d.requested = { method: 'bank', bankName: 'Dev Bank', holderName: who?.name ?? 'Sample Person', accountNumber: fakeAccount(), iban: fakeIban() }
+        return d
+    },
 }
 
 /* ------------------------------------------------------------------ */
@@ -377,6 +389,7 @@ const main = async () => {
             for await (const raw of from.find({})) {
                 const doc = transform ? transform(raw) : raw
                 if (!doc) { skipped++; continue }
+                delete doc.ownerSeal   // Owner Console seals are hashes of the REAL protected values: not copied
                 batch.push(scrubDeep(doc) as Doc)
                 if (batch.length >= BATCH) await flush()
             }

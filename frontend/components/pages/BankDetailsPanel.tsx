@@ -26,7 +26,14 @@ const BankDetailsPanel = () => {
         if (!token) return;
         try { setData((await getMyBankDetails(token)).data ?? null); } catch (e) { toast.showError(errorMessage(e, 'Could not load your bank details')); }
     }, [token, toast]);
-    useEffect(() => { void load(); }, [load]);
+    useEffect(() => {
+        if (!token) return;
+        let cancelled = false;
+        getMyBankDetails(token)
+            .then(res => { if (!cancelled) setData(res.data ?? null); })
+            .catch(e => { if (!cancelled) toast.showError(errorMessage(e, 'Could not load your bank details')); });
+        return () => { cancelled = true; };
+    }, [token, toast]);
 
     const set = (k: keyof typeof EMPTY) => (e: React.ChangeEvent<HTMLInputElement>) => setForm(f => ({ ...f, [k]: e.target.value }));
     const submit = async () => {

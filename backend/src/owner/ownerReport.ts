@@ -86,7 +86,7 @@ export const sendDailyOwnerReport = async (now = new Date()): Promise<OwnerRepor
             ...(check.problems.length > 20 ? [`  ... and ${check.problems.length - 20} more`] : []),
             '',
             integrity.ok
-                ? `Records check: PASSED (${integrity.checked} owner-controlled records match their last signed state)`
+                ? `Records check: PASSED (${integrity.checked - Object.values(integrity.notAdopted).reduce((a, b) => a + b, 0)} owner-controlled records match their last signed state)`
                 : `Records check: FAILED. ${integrity.flags.length} record(s) were changed outside the Owner Console:`,
             ...integrity.flags.slice(0, 20).map(f => `  - ${f.label}: ${f.problem}${f.fields?.length ? ` (${f.fields.map(x => `${x.field}: signed ${JSON.stringify(x.signed)}, now ${JSON.stringify(x.now)}`).join('; ')})` : ''}`),
             ...(integrity.flags.length > 20 ? [`  ... and ${integrity.flags.length - 20} more`] : []),

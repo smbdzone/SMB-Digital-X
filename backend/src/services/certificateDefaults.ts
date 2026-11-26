@@ -13,6 +13,7 @@ export interface DefaultTemplate {
     typeLabel: string
     kind: CertificateKind
     title: string
+    subject?: string
     body: string
 }
 

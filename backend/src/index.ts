@@ -31,7 +31,11 @@ createSalaryDocuments.start()
 cleanupMedia.start();
 unreadChatReminders.start();
 
-app.use(express.json());
+// Routes that may carry the owner's signature image (base64, up to 1 MB) parse their own JSON body with a
+// 2 MB limit, AFTER the admin check (see certificate.routes.ts). Everything else keeps the default 100 KB limit.
+const SIGNATURE_ROUTE = /^\/api\/certificates(\/bulk|\/preview\/pdf|\/[0-9a-fA-F]{24}\/resend-email)?\/?$/;
+const defaultJson = express.json();
+app.use((req, res, next) => (req.method === 'POST' && SIGNATURE_ROUTE.test(req.path) ? next() : defaultJson(req, res, next)));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({
     origin: [

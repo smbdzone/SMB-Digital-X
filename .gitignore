@@ -1,0 +1,8 @@
+# Archives and build output are not source.
+*.zip
+dist/
+backend/dist/
+
+# Agent notes that next dev writes locally.
+frontend/AGENTS.md
+frontend/CLAUDE.md

@@ -149,7 +149,13 @@ userSchema.pre('save', async function () {
     if (!this.isModified('password')) return;
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt)
+    // Every password change, by any route, signs out the tokens issued before it (see isVerified).
+    // Rounded down to the second like a token's iat, so a token issued right after the change still works.
+    if (!this.isNew) this.passwordChangedAt = passwordChangeTime()
 })
+
+/** "Now", rounded down to a whole second (JWT iat has second precision). */
+export const passwordChangeTime = (): Date => new Date(Math.floor(Date.now() / 1000) * 1000)
 
 // Compare password method
 userSchema.methods.comparePassword = async function (candidatePassword: string): Promise<boolean> {

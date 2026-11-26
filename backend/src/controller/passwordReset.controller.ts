@@ -48,10 +48,25 @@ const readCode = (body: any): string => {
 // Emails are matched ignoring upper/lower case, so "Ali@x.com" finds "ali@x.com".
 const emailFilter = (email: string) => ({ email: new RegExp(`^${escapeRegex(email)}$`, 'i') })
 
+// Admin accounts cannot be recovered by email (the owner's mailbox must not be a way in).
+// They get exactly the answer an unknown email gets; the attempt is logged without the email address.
+const isAdminAccount = (user: { role?: string } | null | undefined) => user?.role === 'admin'
+const logRefused = (req: Request, step: string, userId: unknown) =>
+    console.warn(`[auth] ${step} refused for an admin account (id ${String(userId)}, ip ${req.ip ?? 'unknown'})`)
+
 // Finds the account and checks the code. Wrong codes are counted; too many wrong codes kill the code.
-const checkCode = async (email: string, code: string) => {
+const checkCode = async (req: Request, email: string, code: string) => {
     const user = await User.findOne(emailFilter(email))
         .select('+passwordResetCodeHash +passwordResetExpires +passwordResetAttempts')
+
+    if (isAdminAccount(user)) {
+        logRefused(req, 'password reset code', user!._id)
+        // A code requested before this rule existed must not work either.
+        if (user!.passwordResetCodeHash) {
+            await User.updateOne({ _id: user!._id }, { $unset: { passwordResetCodeHash: '', passwordResetExpires: '', passwordResetSentAt: '' }, $set: { passwordResetAttempts: 0 } })
+        }
+        throw badRequest(INVALID_CODE_MESSAGE)
+    }
 
     if (!user || !user.passwordResetCodeHash || !user.passwordResetExpires || user.passwordResetExpires.getTime() < Date.now()) {
         throw badRequest(INVALID_CODE_MESSAGE)
@@ -84,7 +99,9 @@ export const forgotPasswordController = async (req: Request, res: Response): Pro
     const tooSoon = user?.passwordResetSentAt
         && Date.now() - user.passwordResetSentAt.getTime() < RESEND_COOLDOWN_SECONDS * 1000
 
-    if (!user || user.status === 'inactive' || tooSoon) {
+    if (isAdminAccount(user)) logRefused(req, 'forgot-password', user!._id)
+
+    if (!user || user.status === 'inactive' || tooSoon || isAdminAccount(user)) {
         res.status(200).json({ success: true, message: GENERIC_MESSAGE })
         return
     }
@@ -115,7 +132,7 @@ export const forgotPasswordController = async (req: Request, res: Response): Pro
 // Optional step so the frontend can check the code before showing the "new password" form.
 // It does not use up the code; /reset-password checks it again.
 export const verifyResetCodeController = async (req: Request, res: Response): Promise<void> => {
-    await checkCode(readEmail(req.body), readCode(req.body))
+    await checkCode(req, readEmail(req.body), readCode(req.body))
     res.status(200).json({ success: true, message: 'Code verified' })
 }
 
@@ -130,11 +147,11 @@ export const resetPasswordController = async (req: Request, res: Response): Prom
     }
     if (newPassword.length > 128) throw badRequest('Password must be at most 128 characters')
 
-    const user = await checkCode(email, code)
+    const user = await checkCode(req, email, code)
 
     // Saved as a document so the bcrypt hashing hook runs.
     user.password = newPassword
-    user.passwordChangedAt = new Date()   // signs out every device that logged in before this moment
+    // passwordChangedAt is set by the save hook: every device that logged in before this moment is signed out.
     user.set('passwordResetCodeHash', undefined)
     user.set('passwordResetExpires', undefined)
     user.set('passwordResetAttempts', 0)

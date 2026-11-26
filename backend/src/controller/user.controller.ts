@@ -21,6 +21,44 @@ const generateToken =({ id, role }: { id: string, role: string }): string => {
         { expiresIn: '30d' })
 }
 
+const MIN_PASSWORD_LENGTH = 8
+const MAX_PASSWORD_LENGTH = 128
+
+const readNewPassword = (value: unknown): string => {
+    if (typeof value !== 'string' || value.length < MIN_PASSWORD_LENGTH) throw badRequest(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`)
+    if (value.length > MAX_PASSWORD_LENGTH) throw badRequest(`Password must be at most ${MAX_PASSWORD_LENGTH} characters`)
+    return value
+}
+
+/** 400 unless `current` is the account's password. The account must be loaded with +password. */
+const assertCurrentPassword = async (user: { comparePassword(p: string): Promise<boolean> }, current: unknown) => {
+    if (typeof current !== 'string' || !current) throw badRequest('Enter your current password')
+    // 400, not 401: a 401 would make the app sign the user out.
+    if (!await user.comparePassword(current)) throw badRequest('Current password is incorrect')
+}
+
+// POST /api/auth/change-password   { currentPassword, newPassword }   (signed in, own account only)
+// Every other session of this account is signed out; this one gets a fresh token in the answer.
+export const changePasswordController = async (req: Request, res: Response): Promise<void> => {
+    const auth = getAuth(req);
+    const b = req.body ?? {};
+    const user = await User.findById(auth.id).select('+password');
+    if (!user) throw notFound('Account not found');
+
+    await assertCurrentPassword(user, b.currentPassword);
+    const newPassword = readNewPassword(b.newPassword);
+    if (await user.comparePassword(newPassword)) throw badRequest('The new password must be different from the current one');
+
+    user.password = newPassword;
+    await user.save();   // the save hook hashes it and sets passwordChangedAt
+
+    res.status(200).json({
+        success: true,
+        message: 'Password changed. Other devices have been signed out.',
+        data: { token: generateToken({ id: String(user._id), role: user.role }) },
+    });
+};
+
 // Creates an employee (admin only - see user.routes.ts). Salary and company are set here.
 export const registerController = async (req: Request, res: Response): Promise<void> => {
     const b = req.body ?? {};
@@ -157,22 +195,34 @@ export const updateController = async (req: Request, res: Response): Promise<voi
 
     // Loaded as a document and saved (not findByIdAndUpdate) so the password-hashing hook runs.
     // The old code saved changed passwords in PLAIN TEXT because updates skip that hook.
-    const user = await User.findById(id).select('+bankDetails');
+    const user = await User.findById(id).select('+bankDetails +password');
     if (!user) throw notFound('Employee not found');
 
     const b = req.body ?? {};
+    const self = id === auth.id;
+
+    // An admin account's password and email are the keys to the owner's data: only that account
+    // itself can change them, and only with its current password. (Email recovery is off for admins.)
+    const wantsPassword = typeof b.password === 'string' && b.password.trim() !== '';
+    const wantsEmail = b.email !== undefined
+        && String(b.email).trim().toLowerCase() !== String(user.email ?? '').toLowerCase();
+    if (user.role === 'admin' && (wantsPassword || wantsEmail)) {
+        if (!self) throw forbidden("Only the account owner can change an admin's password or email");
+        await assertCurrentPassword(user, b.currentPassword);
+    }
 
     if (b.name !== undefined) user.name = asText(b.name, 'name', { required: true, max: 100 });
     if (b.position !== undefined) user.position = asText(b.position, 'position', { max: 100 }) ?? '';
 
-    if (b.email !== undefined) {
+    if (wantsEmail) {
         const email = asEmail(b.email, 'email');
         if (!email) throw badRequest('email is required');
         if (await User.findOne({ email, _id: { $ne: user._id } })) throw badRequest('email already registered');
         user.email = email;
     }
 
-    if (typeof b.password === 'string' && b.password.trim()) user.password = b.password;
+    // The save hook sets passwordChangedAt, which signs out every session of this account.
+    if (wantsPassword) user.password = readNewPassword(b.password);
 
     if (b.bankDetails !== undefined) {
         const current = (user.bankDetails as any)?.toObject?.() ?? user.bankDetails ?? {};
@@ -232,6 +282,8 @@ export const updateController = async (req: Request, res: Response): Promise<voi
         success: true,
         message: "Employee profile updated",
         data: safe,
+        // Changing your own password signs out your other sessions; this one continues with a fresh token.
+        ...(self && wantsPassword ? { token: generateToken({ id: String(user._id), role: user.role }) } : {}),
     });
 };
 

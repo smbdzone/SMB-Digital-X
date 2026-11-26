@@ -18,6 +18,7 @@ import certificateRoutes from './routes/certificate.routes.js';
 import employeeHistoryRoutes from './routes/employeeHistory.routes.js';
 import milestoneRoutes from './routes/milestone.routes.js';
 import pushRoutes from './routes/push.routes.js';
+import deliverableRoutes from './routes/deliverable.routes.js';
 import { cleanupMedia, createSalaryDocuments, unreadChatReminders } from './utils/cron-jobs.js';
 import { isVerified } from './middlewares/isVerified.js';
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -60,6 +61,7 @@ app.use("/api/certificates", certificateRoutes);   // auth is applied inside the
 app.use("/api/employee-history", employeeHistoryRoutes); // auth is applied inside the router
 app.use("/api/milestones", milestoneRoutes);              // auth is applied inside the router
 app.use("/api/push", pushRoutes);                          // auth is applied inside the router
+app.use("/api/deliverables", deliverableRoutes);           // auth is applied inside the router
 
 // Health check route
 app.get('/api/health', (req, res) => {

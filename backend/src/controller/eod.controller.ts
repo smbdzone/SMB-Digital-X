@@ -7,6 +7,7 @@ import {
     isObjectId, notFound, paramId, parsePagination, queryString,
 } from "../utils/http.js";
 import { asDayKey, dayKey, keyToDate } from "../utils/dates.js";
+import { prepareDayReport, writeDayReport } from "../services/eodDay.service.js";
 
 /* ------------------------------------------------------------------ */
 /* Helpers                                                             */
@@ -66,13 +67,28 @@ export const createEOD = async (req: Request, res: Response): Promise<void> => {
     const summary = asText(b.summary, "summary", { required: true, max: 5000 });
     const blockers = asText(b.blockers, "blockers", { max: 2000 }) ?? "";
     const tomorrowPlan = asText(b.tomorrowPlan, "tomorrowPlan", { max: 2000 }) ?? "";
-    const overallProgress = b.overallProgress !== undefined ? asPercent(b.overallProgress, "overallProgress") : 0;
-    const completedTasks = asIdList(b.completedTasks, "completedTasks");
-    const inProgressTasks = asIdList(b.inProgressTasks, "inProgressTasks");
-
-    await validateTasks(auth.id, completedTasks, inProgressTasks);
+    let overallProgress = b.overallProgress !== undefined ? asPercent(b.overallProgress, "overallProgress") : 0;
+    let completedTasks = asIdList(b.completedTasks, "completedTasks");
+    let inProgressTasks = asIdList(b.inProgressTasks, "inProgressTasks");
 
     const today = dayKey();
+    const day = await prepareDayReport(auth.id, today, b.outcomes, b.carryOver);
+    const withDeliverables = day.items.length > 0;
+
+    if (withDeliverables) {
+        // The day's deliverables are the record: progress and the task lists come from them.
+        overallProgress = day.overallProgress;
+        completedTasks = day.completedTaskIds;
+        inProgressTasks = day.inProgressTaskIds;
+        // Checked before touching the deliverables, so a second submit changes nothing.
+        if (await EODReport.exists({ employeeId: auth.id, dateKey: today })) {
+            throw conflict("You have already submitted today's EOD report");
+        }
+    } else {
+        await validateTasks(auth.id, completedTasks, inProgressTasks);
+    }
+
+    const carried = withDeliverables ? (await writeDayReport(day)).carried : 0;
 
     let report;
     try {
@@ -86,6 +102,7 @@ export const createEOD = async (req: Request, res: Response): Promise<void> => {
             blockers,
             tomorrowPlan,
             overallProgress,
+            deliverableStats: withDeliverables ? day.stats : undefined,
         });
     } catch (error) {
         // Two quick submits: the unique index is the real guard, not a find-then-create check.
@@ -97,7 +114,9 @@ export const createEOD = async (req: Request, res: Response): Promise<void> => {
 
     res.status(201).json({
         success: true,
-        message: "EOD report submitted successfully",
+        message: carried
+            ? `EOD report submitted. ${carried} item${carried === 1 ? "" : "s"} carried over to tomorrow`
+            : "EOD report submitted successfully",
         data: populated,
     });
 };
@@ -119,7 +138,15 @@ export const updateMyEOD = async (req: Request, res: Response): Promise<void> =>
     if (b.tomorrowPlan !== undefined) report.tomorrowPlan = asText(b.tomorrowPlan, "tomorrowPlan", { max: 2000 }) ?? "";
     if (b.overallProgress !== undefined) report.overallProgress = asPercent(b.overallProgress, "overallProgress");
 
-    if (b.completedTasks !== undefined || b.inProgressTasks !== undefined) {
+    const day = await prepareDayReport(auth.id, report.dateKey, b.outcomes, b.carryOver);
+    let carried = 0;
+    if (day.items.length > 0) {
+        carried = (await writeDayReport(day)).carried;
+        report.overallProgress = day.overallProgress;
+        report.set("deliverableStats", day.stats);
+        report.set("completedTasks", day.completedTaskIds);
+        report.set("inProgressTasks", day.inProgressTaskIds);
+    } else if (b.completedTasks !== undefined || b.inProgressTasks !== undefined) {
         const completed = b.completedTasks !== undefined
             ? asIdList(b.completedTasks, "completedTasks")
             : report.completedTasks.map(String);
@@ -135,7 +162,13 @@ export const updateMyEOD = async (req: Request, res: Response): Promise<void> =>
     await report.save();
     const populated = await populateEOD(EODReport.findById(report._id));
 
-    res.status(200).json({ success: true, message: "EOD report updated successfully", data: populated });
+    res.status(200).json({
+        success: true,
+        message: carried
+            ? `EOD report updated. ${carried} item${carried === 1 ? "" : "s"} carried over to tomorrow`
+            : "EOD report updated successfully",
+        data: populated,
+    });
 };
 
 // GET /api/eod/my?from=&to=&status=&page=&limit=

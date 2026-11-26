@@ -119,6 +119,7 @@ export const loginController = async (
                     name: exist.name,
                     email: exist.email,
                     role: exist.role,
+                    canApproveDeliverables: exist.role === 'admin' || exist.canApproveDeliverables === true,
                 },
             },
         });
@@ -186,6 +187,10 @@ export const updateController = async (req: Request, res: Response): Promise<voi
             user.status = b.status;
         }
         if (b.companyId !== undefined) user.companyId = b.companyId ? await resolveActiveCompanyId(b.companyId) : undefined;
+        if (b.canApproveDeliverables !== undefined) {
+            if (typeof b.canApproveDeliverables !== 'boolean') throw badRequest('canApproveDeliverables must be true or false');
+            user.canApproveDeliverables = b.canApproveDeliverables;
+        }
 
         const newAmount = b.salaryAmount !== undefined ? asAmount(b.salaryAmount, 'salaryAmount') : undefined;
         const newCurrency = (b.salaryCurrency ?? b.sallaryCurrency) !== undefined
@@ -216,8 +221,8 @@ export const updateController = async (req: Request, res: Response): Promise<voi
             user.set('salary.allowances', newAllowances ?? currentAllowances);
             user.set('salary.effectiveFrom', new Date());
         }
-    } else if (b.status !== undefined || b.companyId !== undefined || b.salaryAmount !== undefined || b.salaryCurrency !== undefined || b.salaryAllowances !== undefined) {
-        throw forbidden('Only an admin can change status, company or salary');
+    } else if (b.status !== undefined || b.companyId !== undefined || b.salaryAmount !== undefined || b.salaryCurrency !== undefined || b.salaryAllowances !== undefined || b.canApproveDeliverables !== undefined) {
+        throw forbidden('Only an admin can change status, company, salary or approver rights');
     }
 
     await user.save();

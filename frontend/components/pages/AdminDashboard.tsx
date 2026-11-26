@@ -2,12 +2,13 @@
 
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { FiArrowRight, FiBriefcase, FiCalendar, FiCheckCircle, FiClock, FiDollarSign, FiUsers, FiTrendingUp, FiAlertCircle } from 'react-icons/fi'
+import { FiArrowRight, FiBriefcase, FiCalendar, FiCheckCircle, FiCheckSquare, FiClock, FiDollarSign, FiFileText, FiList, FiUsers, FiTrendingUp, FiAlertCircle } from 'react-icons/fi'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { fetchDashboard, DashboardData } from '@/services/dashboard.services'
 import { StatCard, SectionHeader, EmptyState, ProjectStatus } from '@/components/ui/shared'
 import { formatMoney } from '@/lib/utils'
+import { DaySummary, fetchDaySummary } from '@/services/deliverable.services'
 
 const AdminDashboard = () => {
     const { token } = useAuth()
@@ -62,6 +63,8 @@ const AdminDashboard = () => {
                 <StatCard title="Total Expenses" value={formatMoney(dashboard.expenses.total)} subtitle={`${formatMoney(dashboard.expenses.monthly)} this month`} icon={<FiDollarSign className="size-5" />} href="/expenses" />
                 <StatCard title="Remaining Budget" value={formatMoney(dashboard.budget.remaining)} subtitle={`of ${formatMoney(dashboard.budget.total)} total budget`} icon={<FiTrendingUp className="size-5" />} href="/projects" />
             </div>
+
+            <TodaysPlans />
 
             <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                 <MiniStat label="Active" value={dashboard.projects.active} icon={<FiClock />} iconClass="bg-emerald-50 text-emerald-600" />
@@ -189,3 +192,24 @@ const DashboardSkeleton = () => (
 )
 
 export default AdminDashboard
+
+// Daily deliverables for today. Loaded separately, so the rest of the dashboard shows even if this fails.
+const TodaysPlans = () => {
+    const { token } = useAuth()
+    const [summary, setSummary] = useState<DaySummary | null>(null)
+
+    useEffect(() => {
+        if (!token) return
+        fetchDaySummary(token).then(r => setSummary(r.data ?? null)).catch(() => setSummary(null))
+    }, [token])
+
+    if (!summary) return null
+    const of = `of ${summary.activeEmployees} active employee${summary.activeEmployees === 1 ? '' : 's'}`
+    return (
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+            <StatCard title="Plans submitted today" value={summary.plansSubmitted} subtitle={of} icon={<FiList className="size-5" />} href="/deliverables/team" />
+            <StatCard title="Waiting for approval" value={summary.plansPendingApproval} subtitle="Plans to approve" icon={<FiCheckSquare className="size-5" />} href="/deliverables/approvals" />
+            <StatCard title="EODs submitted today" value={summary.eodsSubmitted} subtitle={of} icon={<FiFileText className="size-5" />} href="/eod" />
+        </div>
+    )
+}

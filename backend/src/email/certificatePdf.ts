@@ -1,5 +1,7 @@
 import PDFDocument from 'pdfkit';
 import { CertificateKind } from '../model/certificateTemplate.model.js';
+import { assertLetterheadAssets, getLetterhead } from './letterheads.js';
+import { drawLetterheadLetter } from './letterheadPdf.js';
 
 /* ------------------------------------------------------------------ */
 /* Types                                                               */
@@ -8,6 +10,7 @@ import { CertificateKind } from '../model/certificateTemplate.model.js';
 export interface CertificatePdfData {
     kind: CertificateKind;
     company: {
+        code?: string;         // picks the letterhead design (letters only)
         name: string;
         legalName?: string;
         logoUrl?: string;      // absolute https URL
@@ -15,14 +18,21 @@ export interface CertificatePdfData {
         address?: string;
         phone?: string;
         website?: string;
+        contactEmail?: string; // letterhead footer
         footerNote?: string;
     };
     referenceNo: string;
     title: string;
+    subject?: string;
     body: string;
     employeeName: string;
     issueDate: Date;
-    signatory: { name?: string; title?: string; signature?: string };
+    signatory: { name?: string; title?: string };
+    /**
+     * image: the owner's signature, ONLY for the emailed copy (kept in memory, never stored).
+     * signedAt: every later copy shows "Digitally signed by <the signatory printed on it> on <date>" instead.
+     */
+    signature?: { image?: Buffer; signedAt?: Date };
     revoked?: boolean;
 }
 
@@ -67,6 +77,24 @@ const fetchLogo = async (url?: string): Promise<Buffer | null> => {
 export const certificateFileName = (referenceNo: string): string =>
     `${referenceNo.replace(/[^a-zA-Z0-9-]+/g, '-')}.pdf`;
 
+/**
+ * The signature area of the plain letter and the certificate: the signature image (emailed copy only),
+ * else "Digitally signed by <name> on <date>", else nothing (room for a wet signature).
+ */
+const drawSignatureMark = (
+    doc: PDFKit.PDFDocument, signature: CertificatePdfData['signature'], printedName: string,
+    x: number, y: number, width: number, height: number, align: 'left' | 'center',
+) => {
+    if (signature?.image) {
+        doc.image(signature.image, x, y, { fit: [width, height], valign: 'bottom', ...(align === 'center' ? { align: 'center' as const } : {}) });
+    } else if (signature?.signedAt) {
+        const text = `Digitally signed by ${pdfText(printedName)} on ${formatDate(signature.signedAt)}`;
+        doc.font('Helvetica-Oblique').fontSize(8).fillColor('#475569');
+        const h = doc.heightOfString(text, { width, align });
+        doc.text(text, x, y + height - h, { width, align });
+    }
+};
+
 /** Draws a big diagonal "REVOKED" stamp on the current page. */
 const drawRevokedStamp = (doc: PDFKit.PDFDocument) => {
     doc.save();
@@ -84,13 +112,15 @@ const drawRevokedStamp = (doc: PDFKit.PDFDocument) => {
 /** Renders the letter or certificate as a PDF and resolves with the file bytes. */
 export const generateCertificatePdf = async (data: CertificatePdfData): Promise<Buffer> => {
     const color = safeColor(data.company.brandColor);
-    const logo = await fetchLogo(data.company.logoUrl);
     const landscape = data.kind === 'certificate';
+    const letterhead = landscape ? undefined : getLetterhead(data.company.code);
+    if (letterhead) assertLetterheadAssets(letterhead);
+    const logo = letterhead ? null : await fetchLogo(data.company.logoUrl);
 
     const doc = new PDFDocument({
         size: 'A4',
         layout: landscape ? 'landscape' : 'portrait',
-        margin: landscape ? 40 : 50,
+        margin: letterhead ? 0 : landscape ? 40 : 50,
         bufferPages: true,
         info: {
             Title: pdfText(data.title),
@@ -107,7 +137,20 @@ export const generateCertificatePdf = async (data: CertificatePdfData): Promise<
     });
 
     if (landscape) drawCertificate(doc, data, color, logo);
-    else drawLetter(doc, data, color, logo);
+    else if (letterhead) {
+        drawLetterheadLetter(doc, letterhead, {
+            title: data.title,
+            subject: data.subject,
+            body: data.body,
+            recipientName: data.employeeName,
+            issueDate: data.issueDate,
+            referenceNo: data.referenceNo,
+            companyName: data.company.legalName || data.company.name,
+            contact: { phone: data.company.phone, email: data.company.contactEmail, website: data.company.website },
+            signatory: data.signatory,
+            signature: data.signature,
+        });
+    } else drawLetter(doc, data, color, logo);
 
     if (data.revoked) {
         const range = doc.bufferedPageRange();
@@ -171,6 +214,12 @@ const drawLetter = (doc: PDFKit.PDFDocument, data: CertificatePdfData, color: st
         .text(pdfText(data.title).toUpperCase(), left, doc.y, { width, align: 'center', characterSpacing: 0.5 });
     doc.y += 22;
 
+    if (data.subject?.trim()) {
+        doc.font('Helvetica-Bold').fontSize(11).fillColor('#1e293b')
+            .text(`Subject: ${pdfText(data.subject.trim())}`, left, doc.y, { width });
+        doc.y += 10;
+    }
+
     /* ---------- Body ---------- */
     const paragraphs = data.body.replace(/\r\n/g, '\n').split('\n');
     doc.font('Helvetica').fontSize(11).fillColor('#1e293b');
@@ -189,9 +238,7 @@ const drawLetter = (doc: PDFKit.PDFDocument, data: CertificatePdfData, color: st
     doc.y += 30;
     const signTop = doc.y;
     const { signatory } = data;
-    if (signatory.signature) {
-        doc.font('Helvetica-Oblique').fontSize(18).fillColor('#0f172a').text(pdfText(signatory.signature), left, signTop, { width: 260 });
-    }
+    drawSignatureMark(doc, data.signature, signatory.name || company.name, left, signTop - 14, 200, 42, 'left');
     const lineY = signTop + 30;
     doc.moveTo(left, lineY).lineTo(left + 200, lineY).lineWidth(0.8).strokeColor('#94a3b8').stroke();
     doc.font('Helvetica-Bold').fontSize(10).fillColor('#0f172a').text(pdfText(signatory.name || company.name), left, lineY + 5, { width: 260 });
@@ -280,10 +327,7 @@ const drawCertificate = (doc: PDFKit.PDFDocument, data: CertificatePdfData, colo
 
     // signature
     const sigX = W - 290;
-    if (signatory.signature) {
-        doc.font('Helvetica-Oblique').fontSize(18).fillColor('#0f172a')
-            .text(pdfText(signatory.signature), sigX, rowY - 24, { width: 220, align: 'center', lineBreak: false, ellipsis: true });
-    }
+    drawSignatureMark(doc, data.signature, signatory.name || company.name, sigX, rowY - 46, 220, 52, 'center');
     doc.moveTo(sigX, rowY + 10).lineTo(sigX + 220, rowY + 10).lineWidth(0.8).strokeColor('#94a3b8').stroke();
     doc.font('Helvetica-Bold').fontSize(11).fillColor('#0f172a')
         .text(pdfText(signatory.name || company.name), sigX, rowY + 14, { width: 220, align: 'center', lineBreak: false, ellipsis: true });

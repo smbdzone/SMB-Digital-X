@@ -18,6 +18,7 @@ import certificateRoutes from './routes/certificate.routes.js';
 import employeeHistoryRoutes from './routes/employeeHistory.routes.js';
 import milestoneRoutes from './routes/milestone.routes.js';
 import pushRoutes from './routes/push.routes.js';
+import deliverableRoutes from './routes/deliverable.routes.js';
 import { cleanupMedia, createSalaryDocuments, unreadChatReminders } from './utils/cron-jobs.js';
 import { isVerified } from './middlewares/isVerified.js';
 import { errorHandler } from './middlewares/errorHandler.js';
@@ -30,7 +31,11 @@ createSalaryDocuments.start()
 cleanupMedia.start();
 unreadChatReminders.start();
 
-app.use(express.json());
+// Routes that may carry the owner's signature image (base64, up to 1 MB) parse their own JSON body with a
+// 2 MB limit, AFTER the admin check (see certificate.routes.ts). Everything else keeps the default 100 KB limit.
+const SIGNATURE_ROUTE = /^\/api\/certificates(\/bulk|\/preview\/pdf|\/[0-9a-fA-F]{24}\/resend-email)?\/?$/;
+const defaultJson = express.json();
+app.use((req, res, next) => (req.method === 'POST' && SIGNATURE_ROUTE.test(req.path) ? next() : defaultJson(req, res, next)));
 app.use(express.urlencoded({ extended: true }));
 app.use(cors({
     origin: [
@@ -60,6 +65,7 @@ app.use("/api/certificates", certificateRoutes);   // auth is applied inside the
 app.use("/api/employee-history", employeeHistoryRoutes); // auth is applied inside the router
 app.use("/api/milestones", milestoneRoutes);              // auth is applied inside the router
 app.use("/api/push", pushRoutes);                          // auth is applied inside the router
+app.use("/api/deliverables", deliverableRoutes);           // auth is applied inside the router
 
 // Health check route
 app.get('/api/health', (req, res) => {

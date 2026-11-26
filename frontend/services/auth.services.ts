@@ -38,6 +38,8 @@ export interface UpdateEmployeePayload {
     password?: string;
     position?: string;
     status?: "active" | "inactive";
+    // Admin only: lets this employee approve other people's daily plans
+    canApproveDeliverables?: boolean;
     salaryAmount?: number;
     salaryCurrency?: string;
     salaryAllowances?: SalaryAllowance[];
@@ -54,6 +56,8 @@ export interface User {
     position?: string
     status?: "active" | "inactive";
     companyId?: string;
+    // Can approve daily deliverable plans (always true for the admin). Set by the admin only.
+    canApproveDeliverables?: boolean;
     salary?: { amount?: number; currency?: string; effectiveFrom?: string; allowances?: SalaryAllowance[] };
     [key: string]: unknown;
 }

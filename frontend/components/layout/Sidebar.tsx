@@ -14,6 +14,10 @@ import {
     FiFileText as FileText,
     FiAward as Award,
     FiClock as History,
+    FiCheckSquare as CheckSquare,
+    FiList as ListChecks,
+    FiUsers as TeamIcon,
+    FiBarChart2 as BarChart,
 } from "react-icons/fi";
 import { TfiReceipt as Receipt } from "react-icons/tfi";
 import {
@@ -23,6 +27,26 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import { useEffect, useState } from "react";
 import { VscProject } from "react-icons/vsc";
+import { useDeliverableAccess } from "@/hooks/useDeliverableAccess";
+
+// Daily deliverables. The approval queue and the team day are only for approvers
+// (the admin and employees the admin flagged with canApproveDeliverables).
+const approverItems = [
+    { label: "Plan Approvals", href: "/deliverables/approvals", icon: CheckSquare },
+    { label: "Team Day", href: "/deliverables/team", icon: TeamIcon },
+];
+const planItems = [
+    { label: "Today's Plan", href: "/deliverables", icon: ListChecks },
+    { label: "My Performance", href: "/deliverables/performance", icon: BarChart },
+];
+const adminDeliverables = {
+    title: "Daily Deliverables",
+    items: [...approverItems, { label: "Performance", href: "/deliverables/performance", icon: BarChart }],
+};
+const employeeDeliverables = (canApprove: boolean) => ({
+    title: "Daily Deliverables",
+    items: canApprove ? [...planItems, ...approverItems] : planItems,
+});
 
 const adminNavigation = [
     {
@@ -164,20 +188,27 @@ function Sidebar({
     setMobileOpen: (value: boolean) => void;
 }) {
     const { logout, role } = useAuth()
+    const { canApprove } = useDeliverableAccess()
     const pathname = usePathname();
     const router = useRouter()
     const [navigation, setNavigation] = useState<any[]>([])
 
     useEffect(() => {
         if (role === 'employee') {
-            setNavigation(employeeNavigation);
+            setNavigation([employeeNavigation[0], employeeDeliverables(canApprove), ...employeeNavigation.slice(1)]);
         }
         if (role === 'admin') {
-            setNavigation(adminNavigation)
+            setNavigation([adminNavigation[0], adminDeliverables, ...adminNavigation.slice(1)])
         }
     }, [
-        role
+        role, canApprove
     ])
+
+    // The most specific link wins, so "/deliverables/approvals" does not also light up "/deliverables".
+    const activeHref = navigation
+        .flatMap((section: any) => section.items.map((item: any) => item.href as string))
+        .filter((href: string) => pathname === href || (href !== "/" && pathname.startsWith(`${href}/`)))
+        .sort((a: string, b: string) => b.length - a.length)[0]
 
     return (
         <>
@@ -240,10 +271,7 @@ function Sidebar({
                                 {section.items.map((item: any) => {
                                     const Icon = item.icon;
 
-                                    const isActive =
-                                        pathname === item.href ||
-                                        (item.href !== "/dashboard" &&
-                                            pathname.startsWith(`${item.href}/`));
+                                    const isActive = item.href === activeHref;
 
                                     return (
                                         <Link

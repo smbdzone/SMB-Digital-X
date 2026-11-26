@@ -12,7 +12,6 @@ export type CertificateEmailStatus = 'not_sent' | 'sent' | 'failed';
 export interface Signatory {
     name?: string;
     title?: string;
-    signature?: string;
 }
 
 export interface CertificatePagination {
@@ -37,10 +36,14 @@ export interface ICertificate {
 
     // Final text (placeholders already replaced). This is what the PDF shows.
     title: string;
+    subject?: string;
     body: string;
     variables?: Record<string, string>;
     issueDate: string;
     signatory: Signatory;
+    // Set when a copy with the owner's signature image was emailed. The image itself is never stored.
+    signedAt?: string;
+    signedBy?: string;
 
     recipient: { name: string; email?: string; position?: string };
     companyName: string;
@@ -68,6 +71,7 @@ export interface CertificateType {
     typeLabel: string;
     kind: CertificateKind;
     title: string;
+    subject: string;
     body: string;
     timesUsed: number;
     lastUsedAt: string | null;
@@ -81,6 +85,7 @@ export interface CertificateTemplate {
     typeLabel: string;
     kind: CertificateKind;
     title: string;
+    subject?: string;
     body: string;
     companyId: string | null;
     isActive: boolean;
@@ -95,6 +100,7 @@ export interface CertificateTemplate {
 export interface IssuePayload {
     type: string;
     title?: string;
+    subject?: string;
     body?: string;
     kind?: CertificateKind;
     companyId?: string;
@@ -103,6 +109,8 @@ export interface IssuePayload {
     signatory?: Signatory;
     sendEmail?: boolean;
     saveTemplate?: boolean;
+    /** The owner's signature (base64 PNG/JPEG, max 1 MB). Only for the PDF preview, issue and bulk issue. Never stored. */
+    signatureImage?: string;
 }
 
 export interface CertificatePreview {
@@ -110,6 +118,7 @@ export interface CertificatePreview {
     typeLabel: string;
     kind: CertificateKind;
     title: string;
+    subject?: string;
     body: string;
     issueDate: string;
     signatory: Signatory;
@@ -150,6 +159,7 @@ export interface TemplatePayload {
     type?: string;
     kind?: CertificateKind;
     title?: string;
+    subject?: string;
     body?: string;
     companyId?: string;
     isActive?: boolean;
@@ -217,10 +227,12 @@ export const getCertificatePdf = (token: string, id: string) =>
     apiClient<Blob>(`/certificates/${id}/pdf?inline=true`, { token, responseType: 'blob' });
 
 // Throws an ApiError when the email fails again.
-export const resendCertificateEmail = (token: string, id: string) =>
+// With signatureImage the resent copy carries the signature (memory only); without, it shows "Digitally signed by ...".
+export const resendCertificateEmail = (token: string, id: string, signatureImage?: string) =>
     apiClient<ApiEnvelope & { email: EmailOutcome }>(`/certificates/${id}/resend-email`, {
         method: 'POST',
         token,
+        body: JSON.stringify(signatureImage ? { signatureImage } : {}),
     });
 
 export const revokeCertificate = (token: string, id: string, reason?: string) =>

@@ -30,10 +30,11 @@ interface TemplateForm {
     kind: CertificateKind
     companyId: string
     title: string
+    subject: string
     body: string
 }
 
-const emptyForm: TemplateForm = { typeLabel: '', kind: 'letter', companyId: '', title: '', body: '' }
+const emptyForm: TemplateForm = { typeLabel: '', kind: 'letter', companyId: '', title: '', subject: '', body: '' }
 
 const SavedTexts = () => {
     const { token } = useAuth()
@@ -75,7 +76,7 @@ const SavedTexts = () => {
     }
 
     const openEdit = (t: CertificateTemplate) => {
-        setForm({ typeLabel: t.typeLabel, kind: t.kind, companyId: t.companyId ?? '', title: t.title, body: t.body })
+        setForm({ typeLabel: t.typeLabel, kind: t.kind, companyId: t.companyId ?? '', title: t.title, subject: t.subject ?? '', body: t.body })
         setEditing(t)
     }
 
@@ -93,6 +94,7 @@ const SavedTexts = () => {
                     type: form.typeLabel.trim(),
                     kind: form.kind,
                     title: form.title.trim(),
+                    subject: form.subject.trim(),
                     body: form.body.trim(),
                     companyId: form.companyId || undefined,
                 })
@@ -102,6 +104,7 @@ const SavedTexts = () => {
                 const res = await updateCertificateTemplate(token, editing._id, {
                     kind: form.kind,
                     title: form.title.trim(),
+                    subject: form.subject.trim(),
                     body: form.body.trim(),
                 })
                 toast.showSuccess(res.message || 'Saved text updated')
@@ -280,6 +283,8 @@ const SavedTexts = () => {
                         body={form.body}
                         onTitleChange={v => setForm(f => ({ ...f, title: v }))}
                         onBodyChange={v => setForm(f => ({ ...f, body: v }))}
+                        subject={form.subject}
+                        onSubjectChange={form.kind === 'letter' ? v => setForm(f => ({ ...f, subject: v })) : undefined}
                         disabled={saving}
                     />
                 </div>

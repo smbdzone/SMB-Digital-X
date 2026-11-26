@@ -9,6 +9,7 @@ export interface ICertificateTemplate extends Document {
     typeLabel: string        // what the admin typed, e.g. "Course Completion Certificate"
     kind: CertificateKind
     title: string            // may contain {{placeholders}}
+    subject?: string         // optional "Subject:" line (letters); may contain {{placeholders}}
     body: string             // may contain {{placeholders}}
     companyId: Types.ObjectId | null   // null = available for every company
     isActive: boolean
@@ -26,6 +27,7 @@ const templateSchema = new Schema<ICertificateTemplate>(
         typeLabel: { type: String, required: true, trim: true, maxlength: 100 },
         kind: { type: String, enum: ['letter', 'certificate'], default: 'letter' },
         title: { type: String, required: true, trim: true, maxlength: 200 },
+        subject: { type: String, trim: true, maxlength: 200, default: '' },
         body: { type: String, required: true, maxlength: 8000 },
         companyId: { type: Schema.Types.ObjectId, ref: 'Company', default: null },
         isActive: { type: Boolean, default: true },

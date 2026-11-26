@@ -20,6 +20,10 @@ import Pagination from '../ui/Pagination'
 import { StatusBadge, InfoBox, ReportSection, TaskList, TextAreaField, TaskStatusButton } from '@/components/ui/shared'
 import { errorMessage, formatDate } from '@/lib/utils'
 import { formatDayKey, reportDayKey, shiftDayKey, todayKey } from '@/lib/eodDate'
+import Link from 'next/link'
+import { Deliverable, fetchMyDay } from '@/services/deliverable.services'
+import EodOutcomes, { calculatedProgress, initialOutcomes, OutcomeDraft, toOutcomePayload } from '@/components/deliverables/EodOutcomes'
+import EodDeliverables, { CountsLine } from '@/components/deliverables/EodDeliverables'
 
 interface Task { _id: string; title: string; status?: string; progress?: number }
 type TaskWorkStatus = 'none' | 'progress' | 'completed'
@@ -59,6 +63,11 @@ const EmployeeEOD = () => {
 
     const [form, setForm] = useState(EMPTY_FORM)
     const [taskStatus, setTaskStatus] = useState<Record<string, TaskWorkStatus>>({})
+
+    // Today's deliverables. When there are any, the report is made of their outcomes and the
+    // progress is calculated; without them the old form (tasks + typed progress) is used.
+    const [dayItems, setDayItems] = useState<Deliverable[] | null>(null)
+    const [outcomes, setOutcomes] = useState<Record<string, OutcomeDraft>>({})
 
     // Ignore answers of older requests (fast page / filter changes)
     const listRequest = useRef(0)
@@ -159,6 +168,27 @@ const EmployeeEOD = () => {
         setTaskStatus(prev => ({ ...prev, [id]: status }))
     }
 
+    const changeOutcome = (id: string, patch: Partial<OutcomeDraft>) => {
+        setOutcomes(prev => ({ ...prev, [id]: { ...prev[id], ...patch } }))
+    }
+
+    // Loads today's deliverables each time the form opens (the plan may have changed since the page loaded).
+    const loadDayItems = async () => {
+        if (!token) return
+        setDayItems(null)
+        try {
+            const response = await fetchMyDay(token, todayKey())
+            const items = response.data?.items ?? []
+            setDayItems(items)
+            setOutcomes(initialOutcomes(items))
+        } catch (error) {
+            console.log(error)
+            toast.showError(errorMessage(error, "Failed to load today's deliverables"))
+            setDayItems([])
+            setOutcomes({})
+        }
+    }
+
     const openCreateModal = () => {
         if (todayReport) {
             toast.showError("You have already submitted today's EOD report")
@@ -167,6 +197,7 @@ const EmployeeEOD = () => {
         setForm(EMPTY_FORM)
         setTaskStatus({})
         setFormMode('create')
+        void loadDayItems()
     }
 
     const openEditModal = () => {
@@ -186,6 +217,7 @@ const EmployeeEOD = () => {
         todayReport.inProgressTasks.forEach(t => { current[t._id] = 'progress' })
         setTaskStatus(current)
         setFormMode('edit')
+        void loadDayItems()
     }
 
     const closeForm = () => setFormMode(null)
@@ -199,22 +231,45 @@ const EmployeeEOD = () => {
             return
         }
 
-        const progress = Number(form.overallProgress)
-        if (form.overallProgress === '' || Number.isNaN(progress) || progress < 0 || progress > 100) {
-            toast.showError('Overall progress must be between 0 and 100')
+        if (dayItems === null) {
+            toast.showError("Today's deliverables are still loading")
             return
         }
 
-        const completedTasks = Object.entries(taskStatus).filter(([, s]) => s === 'completed').map(([id]) => id)
-        const inProgressTasks = Object.entries(taskStatus).filter(([, s]) => s === 'progress').map(([id]) => id)
+        let payload
+        if (dayItems.length > 0) {
+            // Day with deliverables: the backend calculates the progress and the task lists from the outcomes.
+            const result = toOutcomePayload(dayItems, outcomes)
+            if (typeof result === 'string') {
+                toast.showError(result)
+                return
+            }
+            payload = {
+                summary,
+                completedTasks: [],
+                inProgressTasks: [],
+                blockers: form.blockers.trim(),
+                tomorrowPlan: form.tomorrowPlan.trim(),
+                ...result,
+            }
+        } else {
+            const progress = Number(form.overallProgress)
+            if (form.overallProgress === '' || Number.isNaN(progress) || progress < 0 || progress > 100) {
+                toast.showError('Overall progress must be between 0 and 100')
+                return
+            }
 
-        const payload = {
-            summary,
-            completedTasks,
-            inProgressTasks,
-            blockers: form.blockers.trim(),
-            tomorrowPlan: form.tomorrowPlan.trim(),
-            overallProgress: progress,
+            const completedTasks = Object.entries(taskStatus).filter(([, s]) => s === 'completed').map(([id]) => id)
+            const inProgressTasks = Object.entries(taskStatus).filter(([, s]) => s === 'progress').map(([id]) => id)
+
+            payload = {
+                summary,
+                completedTasks,
+                inProgressTasks,
+                blockers: form.blockers.trim(),
+                tomorrowPlan: form.tomorrowPlan.trim(),
+                overallProgress: progress,
+            }
         }
 
         setSaving(true)
@@ -362,6 +417,27 @@ const EmployeeEOD = () => {
                             <p className="mt-1 text-sm font-semibold">{formatDayKey(isEdit && todayReport ? reportDayKey(todayReport) : today)}</p>
                         </div>
 
+                        {dayItems === null ? (
+                            <div className="rounded-xl bg-charcoal/[0.03] p-4 text-center text-sm text-charcoal/40">Loading today's plan...</div>
+                        ) : dayItems.length > 0 ? (
+                            <div>
+                                <div className="mb-3 flex items-end justify-between gap-3">
+                                    <div>
+                                        <h3 className="font-heading font-bold">Today's Deliverables</h3>
+                                        <p className="mt-1 text-xs text-charcoal/40">Mark what happened to each item. Half completed counts as half.</p>
+                                    </div>
+                                    <div className="shrink-0 text-right">
+                                        <p className="font-heading text-2xl font-bold text-blue-600">{calculatedProgress(Object.values(outcomes))}%</p>
+                                        <p className="text-[11px] text-charcoal/40">Progress</p>
+                                    </div>
+                                </div>
+                                <EodOutcomes items={dayItems} drafts={outcomes} onChange={changeOutcome} />
+                            </div>
+                        ) : (
+                        <>
+                        <div className="rounded-xl bg-blue-50/60 p-3 text-xs text-blue-700">
+                            No plan for today. Next time, <Link href="/deliverables" className="font-semibold underline">plan your day</Link> and the EOD fills in from it.
+                        </div>
                         <div>
                             <div className="mb-3">
                                 <h3 className="font-heading font-bold">Today's Tasks</h3>
@@ -387,7 +463,7 @@ const EmployeeEOD = () => {
                                                 </div>
                                                 <div className="grid grid-cols-3 gap-2">
                                                     <TaskStatusButton active={current === 'none'} onClick={() => changeTaskStatus(task._id, 'none')}>Not Worked</TaskStatusButton>
-                                                    <TaskStatusButton active={current === 'progress'} type="progress" onClick={() => changeTaskStatus(task._id, 'progress')}>In Progress</TaskStatusButton>
+                                                    <TaskStatusButton active={current === 'progress'} type="progress" onClick={() => changeTaskStatus(task._id, 'progress')}>Half completed</TaskStatusButton>
                                                     <TaskStatusButton active={current === 'completed'} type="completed" onClick={() => changeTaskStatus(task._id, 'completed')}>Completed</TaskStatusButton>
                                                 </div>
                                             </div>
@@ -398,13 +474,15 @@ const EmployeeEOD = () => {
                         </div>
 
                         <Input label="Overall Progress (0-100)" name="overallProgress" type="number" min="0" max="100" value={form.overallProgress} handleChange={handleChange} placeholder="Overall progress %" />
+                        </>
+                        )}
                         <TextAreaField label="Today's Summary" name="summary" value={form.summary} onChange={handleChange} required placeholder="What did you accomplish today?" />
                         <TextAreaField label="Blockers / Issues" name="blockers" value={form.blockers} onChange={handleChange} placeholder="Any issue blocking your work?" />
                         <TextAreaField label="Tomorrow's Plan" name="tomorrowPlan" value={form.tomorrowPlan} onChange={handleChange} placeholder="What do you plan to work on tomorrow?" />
 
                         <div className="flex justify-end gap-3 border-t border-charcoal/5 pt-5">
                             <button onClick={closeForm} className="rounded-xl border border-charcoal/10 px-4 py-2.5 text-sm font-semibold">Cancel</button>
-                            <ButtonEmerald onClick={handleSubmit} disabled={saving} icon={<FiSend className="size-4" />}>
+                            <ButtonEmerald onClick={handleSubmit} disabled={saving || dayItems === null} icon={<FiSend className="size-4" />}>
                                 {saving ? (isEdit ? 'Saving...' : 'Submitting...') : (isEdit ? 'Save Changes' : 'Submit EOD')}
                             </ButtonEmerald>
                         </div>
@@ -425,8 +503,17 @@ const EmployeeEOD = () => {
                         </div>
                         <InfoBox title="Overall Progress" value={`${viewReport.overallProgress}%`} />
                         <ReportSection title="Today's Summary" content={viewReport.summary} />
-                        <TaskList title="Completed Tasks" tasks={viewReport.completedTasks} type="completed" />
-                        <TaskList title="In Progress" tasks={viewReport.inProgressTasks} type="progress" />
+                        {viewReport.deliverableStats ? (
+                            <>
+                                <CountsLine stats={viewReport.deliverableStats} />
+                                <EodDeliverables date={reportDayKey(viewReport)} />
+                            </>
+                        ) : (
+                            <>
+                                <TaskList title="Completed Tasks" tasks={viewReport.completedTasks} type="completed" />
+                                <TaskList title="Half completed" tasks={viewReport.inProgressTasks} type="progress" />
+                            </>
+                        )}
                         {viewReport.blockers && <ReportSection title="Blockers / Issues" content={viewReport.blockers} />}
                         {viewReport.tomorrowPlan && <ReportSection title="Tomorrow's Plan" content={viewReport.tomorrowPlan} />}
                         {viewReport.status === 'Reviewed' && (

@@ -18,10 +18,15 @@ export interface ICertificate extends Document {
 
     // Final text after the {{placeholders}} were replaced. This is exactly what the PDF shows.
     title: string
+    subject?: string
     body: string
     variables: Record<string, string>
     issueDate: Date
-    signatory: { name?: string; title?: string; signature?: string }
+    signatory: { name?: string; title?: string }
+    // Set when a copy carrying the owner's signature image was emailed. The image itself is never stored;
+    // every later copy shows "Digitally signed by <signedBy's name> on <signedAt>".
+    signedAt?: Date
+    signedBy?: Types.ObjectId
 
     // Snapshot of the person at the time of issue, so old documents never change.
     recipient: { name: string; email?: string; position?: string }
@@ -56,6 +61,7 @@ const certificateSchema = new Schema<ICertificate>(
         templateId: { type: Schema.Types.ObjectId, ref: 'CertificateTemplate' },
 
         title: { type: String, required: true },
+        subject: { type: String, default: '' },
         body: { type: String, required: true },
         variables: { type: Schema.Types.Mixed, default: {} },
         issueDate: { type: Date, required: true, default: Date.now },
@@ -63,8 +69,9 @@ const certificateSchema = new Schema<ICertificate>(
             _id: false,
             name: { type: String },
             title: { type: String },
-            signature: { type: String },
         },
+        signedAt: { type: Date },
+        signedBy: { type: Schema.Types.ObjectId, ref: 'users' },
 
         recipient: {
             _id: false,

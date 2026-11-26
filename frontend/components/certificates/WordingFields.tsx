@@ -10,6 +10,9 @@ interface WordingFieldsProps {
     body: string
     onTitleChange: (value: string) => void
     onBodyChange: (value: string) => void
+    /** Optional "Subject:" line (letters). Shown when onSubjectChange is given. */
+    subject?: string
+    onSubjectChange?: (value: string) => void
     disabled?: boolean
 }
 
@@ -20,7 +23,7 @@ const CHIPS = AUTO_VARIABLES.filter(v => v !== 'employeeEmail' && v !== 'company
  * Title + body of a letter or certificate. Placeholders like {{employeeName}} are filled in
  * for every person when the document is issued.
  */
-const WordingFields = ({ title, body, onTitleChange, onBodyChange, disabled }: WordingFieldsProps) => {
+const WordingFields = ({ title, body, onTitleChange, onBodyChange, subject, onSubjectChange, disabled }: WordingFieldsProps) => {
     const bodyRef = useRef<HTMLTextAreaElement>(null)
 
     const insert = (name: string) => {
@@ -42,7 +45,7 @@ const WordingFields = ({ title, body, onTitleChange, onBodyChange, disabled }: W
         })
     }
 
-    const custom = findPlaceholders(title, body).filter(p => !isAutoVariable(p))
+    const custom = findPlaceholders(title, subject ?? '', body).filter(p => !isAutoVariable(p))
 
     return (
         <div className="space-y-4">
@@ -55,6 +58,18 @@ const WordingFields = ({ title, body, onTitleChange, onBodyChange, disabled }: W
                 maxLength={200}
                 disabled={disabled}
             />
+
+            {onSubjectChange && (
+                <Input
+                    label="Subject (optional)"
+                    value={subject ?? ''}
+                    handleChange={e => onSubjectChange(e.target.value)}
+                    placeholder="Offer of Employment"
+                    maxLength={200}
+                    disabled={disabled}
+                    helperText="Letters only. Printed as &quot;Subject: ...&quot; above the text. Leave empty for none."
+                />
+            )}
 
             <div>
                 <label className="mb-2 block text-sm font-medium text-charcoal">
@@ -72,6 +87,9 @@ const WordingFields = ({ title, body, onTitleChange, onBodyChange, disabled }: W
                 />
 
                 <p className="mt-2 text-xs text-charcoal/50">
+                    Write <span className="font-semibold">**bold**</span> for bold text, and start a line with &quot;- &quot; for a bullet.
+                </p>
+                <p className="mt-1 text-xs text-charcoal/50">
                     Click a name to add it at the cursor. It is replaced with the real value for each person.
                 </p>
                 <div className="mt-2 flex flex-wrap gap-1.5">

@@ -9,6 +9,7 @@ import SelectField from '@/components/ui/SelectField'
 import { StatusBadge } from '@/components/ui/shared'
 import { CertificateStatusBadge, KindBadge } from './Badges'
 import PdfViewerModal, { type PdfTarget } from './PdfViewerModal'
+import SignaturePicker, { type PickedSignature } from './SignaturePicker'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { useCompanies } from '@/hooks/useCompanies'
@@ -50,6 +51,9 @@ const CertificateIssuedList = () => {
 
     const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null)
     const [revokeTarget, setRevokeTarget] = useState<ICertificate | null>(null)
+    // Resend dialog. The signature is optional and lives only in this state until the dialog closes.
+    const [resendTarget, setResendTarget] = useState<ICertificate | null>(null)
+    const [resendSignature, setResendSignature] = useState<PickedSignature | null>(null)
     const [revokeReason, setRevokeReason] = useState('')
 
     // Wait until the person stops typing before asking the server.
@@ -106,12 +110,24 @@ const CertificateIssuedList = () => {
         }
     }
 
-    const handleResend = async (c: ICertificate) => {
-        if (!token) return
+    const openResend = (c: ICertificate) => {
+        setResendSignature(null)
+        setResendTarget(c)
+    }
+
+    const closeResend = () => {
+        setResendTarget(null)
+        setResendSignature(null)   // cancel = the signature is gone
+    }
+
+    const handleResend = async () => {
+        const c = resendTarget
+        if (!token || !c) return
         setBusyId(c._id)
         try {
-            const res = await resendCertificateEmail(token, c._id)
+            const res = await resendCertificateEmail(token, c._id, resendSignature?.base64)
             toast.showSuccess(res.message || 'Email sent')
+            closeResend()
             await load()
         } catch (error) {
             toast.showError(errorMessage(error, 'The email could not be sent'))
@@ -277,7 +293,7 @@ const CertificateIssuedList = () => {
                                                 {!revoked && (
                                                     <>
                                                         <button
-                                                            onClick={() => handleResend(c)}
+                                                            onClick={() => openResend(c)}
                                                             disabled={rowBusy}
                                                             className="rounded-lg p-2 text-amber-600 transition hover:bg-amber-50 disabled:opacity-40"
                                                             title={c.email?.status === 'sent' ? 'Send the email again' : 'Send the email'}
@@ -299,6 +315,42 @@ const CertificateIssuedList = () => {
             {pagination && <Pagination page={pagination.page} pages={pagination.pages} total={pagination.total} onChange={setPage} disabled={loading} />}
 
             <PdfViewerModal target={pdfTarget} onClose={() => setPdfTarget(null)} />
+
+            {/* Resend */}
+            <ModalBox
+                open={!!resendTarget}
+                onClose={closeResend}
+                size="md"
+                title="Send the email again?"
+                description={resendTarget ? `${resendTarget.referenceNo} to ${resendTarget.recipient?.name}.` : undefined}
+                footer={
+                    <>
+                        <button
+                            type="button"
+                            onClick={closeResend}
+                            className="inline-flex h-11 items-center rounded-xl border border-charcoal/10 bg-white px-4 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03]"
+                        >
+                            Cancel
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleResend}
+                            disabled={!!busyId}
+                            className="inline-flex h-11 items-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:opacity-60"
+                        >
+                            <FiMail className="size-4" /> {busyId ? 'Sending...' : resendSignature ? 'Send signed copy' : 'Send'}
+                        </button>
+                    </>
+                }
+            >
+                <p className="mb-3 text-sm text-charcoal/70">
+                    {resendTarget?.signedAt
+                        ? 'Without a signature, the copy shows "Digitally signed by ..." and no signature image.'
+                        : 'Without a signature, the copy is sent unsigned.'}
+                    {' '}Add the signature to send a signed copy. It is used for this email only and never saved.
+                </p>
+                <SignaturePicker value={resendSignature} onChange={setResendSignature} disabled={!!busyId} />
+            </ModalBox>
 
             {/* Revoke */}
             <ModalBox

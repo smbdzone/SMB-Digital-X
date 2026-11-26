@@ -1,8 +1,11 @@
 import mongoose, { Schema, Document } from 'mongoose'
+import { LETTERHEAD_DESIGN_VALUES, LetterheadDesign } from '../utils/letterheadDesigns.js'
 
 export interface ICompany extends Document {
     name: string          // shown on slips and as the email sender display name
     code: string          // stable slug, e.g. "smb-proptech"
+    /** Letterhead design for letters. Unset = the design with the same code, else plain. */
+    letterhead?: LetterheadDesign | null
     legalName?: string
     logo: string          // absolute URL, or a path served by the frontend e.g. "/images/x.png"
     brandColor: string    // hex colour used for the slip header/accents
@@ -37,6 +40,7 @@ const companySchema = new Schema<ICompany>(
             trim: true,
             match: /^[a-z0-9-]+$/,
         },
+        letterhead: { type: String, enum: [...LETTERHEAD_DESIGN_VALUES, null], default: undefined },
         legalName: { type: String, trim: true },
         logo: { type: String, default: '', trim: true },
         brandColor: { type: String, default: '#0136B0', match: /^#[0-9a-fA-F]{6}$/ },

@@ -1,7 +1,8 @@
 import { Request, Response } from 'express'
 import { Types } from 'mongoose'
 import CertificateTemplate from '../model/certificateTemplate.model.js'
-import { placeholderInfo, toTypeKey } from '../services/certificate.service.js'
+import { assertNoBrokenPlaceholders, placeholderInfo, toTypeKey } from '../services/certificate.service.js'
+import { legacyNames } from '../utils/placeholders.js'
 import { asText, badRequest, getAuth, isObjectId, notFound, paramId, queryString } from '../utils/http.js'
 
 // Saved texts are normally created automatically the first time a type is issued.
@@ -48,13 +49,18 @@ export const createTemplate = async (req: Request, res: Response): Promise<void>
     const typeKey = toTypeKey(typeLabel)
     if (!typeKey) throw badRequest('type must contain letters or numbers')
 
+    const title = asText(b.title, 'title', { required: true, max: 200 })
+    const subject = parseSubject(b.subject) ?? ''
+    const body = asText(b.body, 'body', { required: true, max: 8000 })
+    assertNoBrokenPlaceholders([title, subject, body])   // a new text gets the current rule only
+
     const template = await CertificateTemplate.create({
         typeKey,
         typeLabel,
         kind: b.kind !== undefined ? parseKind(b.kind) : 'letter',
-        title: asText(b.title, 'title', { required: true, max: 200 }),
-        subject: parseSubject(b.subject) ?? '',
-        body: asText(b.body, 'body', { required: true, max: 8000 }),
+        title,
+        subject,
+        body,
         companyId: parseCompany(b.companyId),
         createdBy: new Types.ObjectId(auth.id),
         updatedBy: new Types.ObjectId(auth.id),
@@ -75,6 +81,8 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
     if (b.type !== undefined && toTypeKey(String(b.type)) !== template.typeKey) {
         throw badRequest('The type of a saved text cannot be changed. Create a new one instead.')
     }
+    // Old-style names this text already had stay valid; new broken ones are refused.
+    const legacy = legacyNames(template.title, template.subject, template.body)
     if (b.title !== undefined) template.title = asText(b.title, 'title', { required: true, max: 200 })
     if (b.body !== undefined) template.body = asText(b.body, 'body', { required: true, max: 8000 })
     if (b.subject !== undefined) template.subject = parseSubject(b.subject)
@@ -83,6 +91,7 @@ export const updateTemplate = async (req: Request, res: Response): Promise<void>
         if (typeof b.isActive !== 'boolean') throw badRequest('isActive must be true or false')
         template.isActive = b.isActive
     }
+    assertNoBrokenPlaceholders([template.title, template.subject, template.body], legacy)
     template.updatedBy = new Types.ObjectId(auth.id)
     await template.save()
 

@@ -1,6 +1,6 @@
 import PDFDocument from 'pdfkit';
 import { CertificateKind } from '../model/certificateTemplate.model.js';
-import { assertLetterheadAssets, getLetterhead } from './letterheads.js';
+import { assertLetterheadAssets, letterheadFor } from './letterheads.js';
 import { drawLetterheadLetter } from './letterheadPdf.js';
 
 /* ------------------------------------------------------------------ */
@@ -10,7 +10,8 @@ import { drawLetterheadLetter } from './letterheadPdf.js';
 export interface CertificatePdfData {
     kind: CertificateKind;
     company: {
-        code?: string;         // picks the letterhead design (letters only)
+        code?: string;         // default letterhead design when none is chosen (letters only)
+        letterhead?: string;   // the company's chosen letterhead design (letters only)
         name: string;
         legalName?: string;
         logoUrl?: string;      // absolute https URL
@@ -113,7 +114,8 @@ const drawRevokedStamp = (doc: PDFKit.PDFDocument) => {
 export const generateCertificatePdf = async (data: CertificatePdfData): Promise<Buffer> => {
     const color = safeColor(data.company.brandColor);
     const landscape = data.kind === 'certificate';
-    const letterhead = landscape ? undefined : getLetterhead(data.company.code);
+    // Each company's design is fixed: its stored choice, else the design with its code, else plain.
+    const letterhead = landscape ? undefined : letterheadFor(data.company);
     if (letterhead) assertLetterheadAssets(letterhead);
     const logo = letterhead ? null : await fetchLogo(data.company.logoUrl);
 

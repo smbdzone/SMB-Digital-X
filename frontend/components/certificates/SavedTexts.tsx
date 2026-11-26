@@ -20,6 +20,7 @@ import {
     deleteCertificateTemplate,
     getCertificateTemplates,
     updateCertificateTemplate,
+    legacyNames,
 } from '@/services/certificate.services'
 import { errorMessage, formatDate } from '@/lib/utils'
 
@@ -48,6 +49,8 @@ const SavedTexts = () => {
     // null = closed, 'new' = creating, otherwise the text being edited
     const [editing, setEditing] = useState<CertificateTemplate | 'new' | null>(null)
     const [form, setForm] = useState<TemplateForm>(emptyForm)
+    // Old-style placeholder names the stored text already used; they stay valid while editing it.
+    const [legacy, setLegacy] = useState<string[]>([])
     const [saving, setSaving] = useState(false)
 
     const load = useCallback(async () => {
@@ -72,11 +75,13 @@ const SavedTexts = () => {
 
     const openNew = () => {
         setForm(emptyForm)
+        setLegacy([])
         setEditing('new')
     }
 
     const openEdit = (t: CertificateTemplate) => {
         setForm({ typeLabel: t.typeLabel, kind: t.kind, companyId: t.companyId ?? '', title: t.title, subject: t.subject ?? '', body: t.body })
+        setLegacy(legacyNames(t.title, t.subject, t.body))
         setEditing(t)
     }
 
@@ -286,6 +291,7 @@ const SavedTexts = () => {
                         subject={form.subject}
                         onSubjectChange={form.kind === 'letter' ? v => setForm(f => ({ ...f, subject: v })) : undefined}
                         disabled={saving}
+                        legacy={legacy}
                     />
                 </div>
             </ModalBox>

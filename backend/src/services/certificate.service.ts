@@ -10,6 +10,7 @@ import { certificateFileName, generateCertificatePdf } from '../email/certificat
 import { resolveActiveCompanyId, resolveLogoUrl } from './company.service.js'
 import { DEFAULT_TEMPLATES, getDefaultTemplate } from './certificateDefaults.js'
 import { badRequest, notFound } from '../utils/http.js'
+import { brokenPlaceholderMessage, fillPlaceholders, legacyNames, scanPlaceholders } from '../utils/placeholders.js'
 
 /* ------------------------------------------------------------------ */
 /* Placeholders                                                        */
@@ -28,31 +29,21 @@ export const AUTO_VARIABLES = [
     'signatoryName', 'signatoryTitle',
 ] as const
 
-const PLACEHOLDER = /\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g
-
-export const findPlaceholders = (...texts: string[]): string[] => {
-    const found = new Set<string>()
-    for (const text of texts) for (const m of text.matchAll(PLACEHOLDER)) found.add(m[1])
-    return [...found]
-}
-
-export const placeholderInfo = (title: string, body: string, subject?: string) => {
-    const all = findPlaceholders(title, subject ?? '', body)
+/** For a stored text: its own old-style names stay valid (see utils/placeholders.ts). */
+export const placeholderInfo = (title: string, body: string, subject?: string, legacy?: string[]) => {
+    const { names, broken } = scanPlaceholders([title, subject, body], legacy ?? legacyNames(title, subject, body))
     return {
-        placeholders: all,
+        placeholders: names,
         // The ones the admin has to provide when issuing
-        customPlaceholders: all.filter(p => !(AUTO_VARIABLES as readonly string[]).includes(p)),
+        customPlaceholders: names.filter(p => !(AUTO_VARIABLES as readonly string[]).includes(p)),
+        brokenPlaceholders: broken,
     }
 }
 
-const renderText = (text: string, vars: Record<string, string>): { text: string; missing: string[] } => {
-    const missing = new Set<string>()
-    const out = text.replace(PLACEHOLDER, (_all, key: string) => {
-        if (Object.prototype.hasOwnProperty.call(vars, key)) return vars[key]
-        missing.add(key)
-        return _all
-    })
-    return { text: out, missing: [...missing] }
+/** Saving a text: 400 if it has a broken placeholder. `legacy` = old-style names the stored text already had. */
+export const assertNoBrokenPlaceholders = (texts: (string | undefined)[], legacy: Iterable<string> = []): void => {
+    const { broken } = scanPlaceholders(texts, legacy)
+    if (broken.length) throw badRequest(brokenPlaceholderMessage(broken), { broken })
 }
 
 /** "Course Completion Certificate" -> "course_completion_certificate" */
@@ -165,6 +156,7 @@ interface Content {
     templateId?: Types.ObjectId
     pendingSave: boolean     // new wording that still has to be remembered
     companyId: Types.ObjectId
+    legacy: string[]         // old-style placeholder names the saved / built-in text already used
 }
 
 export interface IssueContext {
@@ -229,6 +221,7 @@ const prepareContent = async (ctx: IssueContext, companyId: Types.ObjectId): Pro
         // Only a company's own saved text counts as "already remembered" for that company.
         pendingSave: input.saveTemplate && wroteText && changed,
         companyId,
+        legacy: fallback ? legacyNames(fallback.title, fallback.subject, fallback.body) : [],
     }
     ctx.contents.set(cacheKey, content)
     return content
@@ -321,10 +314,13 @@ const prepare = async (ctx: IssueContext, employeeId: string): Promise<Prepared>
         title: input.signatory?.title || company.signatory?.title || undefined,
     }
 
+    // A broken placeholder such as {{Abbas Khan}} would otherwise be printed as it is.
+    assertNoBrokenPlaceholders([content.title, content.subject, content.body], content.legacy)
+
     const variables = buildVariables(employee as any, company, issueDate, signatory, input.variables)
-    const title = renderText(content.title, variables)
-    const body = renderText(content.body, variables)
-    const subject = renderText(content.subject, variables)
+    const title = fillPlaceholders(content.title, variables, content.legacy)
+    const body = fillPlaceholders(content.body, variables, content.legacy)
+    const subject = fillPlaceholders(content.subject, variables, content.legacy)
 
     const missing = [...new Set([...title.missing, ...subject.missing, ...body.missing])]
     if (missing.length > 0) {
@@ -362,7 +358,7 @@ export const previewCertificate = async (ctx: IssueContext, employeeId: string) 
         recipient: { name: p.employee.name, email: p.employee.email, position: p.employee.position },
         companyName: p.company.name,
         willRememberWording: p.content.pendingSave,
-        ...placeholderInfo(p.content.title, p.content.body, p.content.subject),
+        ...placeholderInfo(p.content.title, p.content.body, p.content.subject, p.content.legacy),
     }
 }
 
@@ -452,6 +448,7 @@ export const issueCertificate = async (ctx: IssueContext, employeeId: string): P
 /** Company branding for the certificate PDF (shared by issued documents and previews). */
 const pdfCompany = (company: ICompany | null | undefined, fallbackName: string) => ({
     code: company?.code,
+    letterhead: company?.letterhead ?? undefined,
     name: company?.name ?? fallbackName,
     legalName: company?.legalName,
     logoUrl: resolveLogoUrl(company?.logo),

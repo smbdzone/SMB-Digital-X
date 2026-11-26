@@ -279,14 +279,80 @@ export const AUTO_VARIABLES = [
     'signatoryName', 'signatoryTitle',
 ] as const;
 
-const PLACEHOLDER = /\{\{\s*([a-zA-Z][a-zA-Z0-9_]*)\s*\}\}/g;
+/*
+ * Same rules as backend/src/utils/placeholders.ts: keep the two in step.
+ * A placeholder is {{name}} (spaces allowed inside the brackets) where the name starts with a lowercase
+ * letter and is 2 to 40 letters, digits or _. Old saved texts may use names that start with a capital
+ * letter: those are accepted only when they come from that stored text (`legacy`), never when typed.
+ * Anything else in {{ }}, or a stray {{ or }}, is broken and blocks preview and issue.
+ */
+const PLACEHOLDER_NAME = /^[a-z][a-zA-Z0-9_]{1,39}$/;
+const LEGACY_NAME = /^[a-zA-Z][a-zA-Z0-9_]*$/;
+const TOKEN = /\{\{([^{}]*)\}\}/g;
+const STRAY = /\{\{[^\s{}]{0,30}|[^\s{}]{0,30}\}\}/g;
 
-export const findPlaceholders = (...texts: string[]): string[] => {
+export interface PlaceholderScan {
+    names: string[];
+    broken: string[];
+}
+
+/** Old-style names in a stored text; they stay valid for that text. */
+export const legacyNames = (...texts: (string | undefined)[]): string[] => {
     const found = new Set<string>();
     for (const text of texts) {
-        for (const match of text.matchAll(PLACEHOLDER)) found.add(match[1]);
+        for (const m of (text ?? '').matchAll(TOKEN)) {
+            const name = m[1].trim();
+            if (LEGACY_NAME.test(name) && !PLACEHOLDER_NAME.test(name)) found.add(name);
+        }
     }
     return [...found];
+};
+
+export const isValidPlaceholder = (name: string, legacy: readonly string[] = []) =>
+    PLACEHOLDER_NAME.test(name) || legacy.includes(name);
+
+export const scanPlaceholders = (texts: (string | undefined)[], legacy: readonly string[] = []): PlaceholderScan => {
+    const names = new Set<string>();
+    const broken = new Set<string>();
+    for (const text of texts) {
+        if (!text) continue;
+        const rest = text.replace(TOKEN, (all, inner: string) => {
+            const name = inner.trim();
+            if (isValidPlaceholder(name, legacy)) names.add(name);
+            else broken.add(all.length > 44 ? `${all.slice(0, 40)}...}}` : all);
+            return ' ';
+        });
+        for (const m of rest.matchAll(STRAY)) broken.add(m[0]);
+    }
+    return { names: [...names], broken: [...broken] };
+};
+
+export const brokenPlaceholderMessage = (broken: string[]) =>
+    `This text has ${broken.length === 1 ? 'a broken placeholder' : 'broken placeholders'}: ${broken.slice(0, 5).join(', ')}. `
+    + 'Use {{employeeName}}, or type the text without curly brackets.';
+
+/** Splits a text into plain parts and placeholder parts, for highlighting. */
+export type PlaceholderPart = { text: string; kind: 'plain' | 'valid' | 'broken' };
+export const splitPlaceholders = (text: string, legacy: readonly string[] = []): PlaceholderPart[] => {
+    const parts: PlaceholderPart[] = [];
+    const push = (t: string, kind: PlaceholderPart['kind']) => { if (t) parts.push({ text: t, kind }); };
+    const markStray = (t: string) => {
+        let last = 0;
+        for (const m of t.matchAll(/\{\{|\}\}/g)) {
+            push(t.slice(last, m.index), 'plain');
+            push(m[0], 'broken');
+            last = (m.index ?? 0) + m[0].length;
+        }
+        push(t.slice(last), 'plain');
+    };
+    let last = 0;
+    for (const m of text.matchAll(TOKEN)) {
+        markStray(text.slice(last, m.index));
+        push(m[0], isValidPlaceholder(m[1].trim(), legacy) ? 'valid' : 'broken');
+        last = (m.index ?? 0) + m[0].length;
+    }
+    markStray(text.slice(last));
+    return parts;
 };
 
 export const isAutoVariable = (name: string) => (AUTO_VARIABLES as readonly string[]).includes(name);

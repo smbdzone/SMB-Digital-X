@@ -332,4 +332,14 @@ export const drawLetterheadLetter = (doc: PDFKit.PDFDocument, lh: Letterhead, da
     drawText(doc, signatoryName, s.x, y, s.name.style)
     y += s.name.height
     if (signatoryTitle) drawText(doc, signatoryTitle, s.x, y, s.title.style)
+
+    /* ---------- "Ref ... · Page X of N" on every page, only when the letter has more than one page ---------- */
+    const range = doc.bufferedPageRange()
+    if (range.count > 1) {
+        for (let i = 0; i < range.count; i++) {
+            doc.switchToPage(range.start + i)
+            const f = (i === 0 ? lh.first : lh.next).pageFooter
+            drawAligned(doc, `Ref ${clean(data.referenceNo)} · Page ${i + 1} of ${range.count}`, f.x, f.y, f.align, lh.pageFooterStyle)
+        }
+    }
 }

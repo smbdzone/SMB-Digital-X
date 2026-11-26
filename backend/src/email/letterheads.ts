@@ -53,6 +53,11 @@ export interface PageFrame {
     bodyBottom: number
     /** Lowest point for the closing + signature block. */
     blockBottom: number
+    /**
+     * "Ref <reference> · Page X of N" on letters longer than one page. Placed between the lowest content
+     * (bodyBottom / blockBottom) and the footer artwork, never touching it.
+     */
+    pageFooter: { x: number; y: number; align: 'left' | 'right' }
 }
 
 export interface Letterhead {
@@ -71,6 +76,8 @@ export interface Letterhead {
         format: 'MMM d, yyyy' | 'd MMM, yyyy' | 'MMMM d, yyyy'
         prefix?: string       // "Date: "
     }
+    /** Style of the page footer line (multi-page letters): body font, small, the company's muted colour. */
+    pageFooterStyle: TextStyle
     /** Small reference number line. `y` is absolute. */
     reference: { y: number; style: TextStyle; align: 'left' | 'right'; x: number }
     /** "To:" + recipient name. Omitted on designs without it. */
@@ -138,13 +145,15 @@ const axisAura: Letterhead = {
         top: 0,
         bodyBottom: 668,
         blockBottom: 668,
+        pageFooter: { x: 534.5, y: 698, align: 'right' },   // footer band starts at y 715.5; the emblem stays left of x 203
     },
     // The design's page 2 is the plain background.
-    next: { art: [{ type: 'fill', color: '#f7fbff' }], top: 60, bodyBottom: 780, blockBottom: 790 },
+    next: { art: [{ type: 'fill', color: '#f7fbff' }], top: 60, bodyBottom: 780, blockBottom: 790, pageFooter: { x: 534.5, y: 805, align: 'right' } },
 
     title: { y: 183.2, centerX: 295.8, uppercase: true, style: { font: 'Arimo-Bold', size: 25, color: '#013049' } },
     date: { y: 234.8, x: 531.1, align: 'right', format: 'MMM d, yyyy', style: { font: 'Arimo-Regular', size: 12, color: '#3d414d' } },
     reference: { y: 251, x: 531.1, align: 'right', style: { font: 'Arimo-Regular', size: 8, color: '#7b8190' } },
+    pageFooterStyle: { font: 'Poppins-Regular', size: 8, color: '#7b8190' },
     recipient: {
         label: 'To:', x: 59.5,
         labelY: 236.1, labelStyle: { font: 'Arimo-Bold', size: 13, color: '#3d414d' },
@@ -193,6 +202,7 @@ const smbProptech: Letterhead = {
         top: 0,
         bodyBottom: 640,
         blockBottom: 662,
+        pageFooter: { x: 537.6, y: 698, align: 'right' },   // footer band starts at y 716.6; the globe stays left of x 220
     },
     // Continuation: same background, watermark and footer; a thin gradient strip instead of the logo header.
     next: {
@@ -205,6 +215,7 @@ const smbProptech: Letterhead = {
         top: 56,
         bodyBottom: 640,
         blockBottom: 662,
+        pageFooter: { x: 537.6, y: 698, align: 'right' },
     },
 
     // Only the title keeps the design's drop shadow; on small text it read as doubled text.
@@ -212,6 +223,7 @@ const smbProptech: Letterhead = {
     date: { y: 191.2, x: 59.5, align: 'left', format: 'd MMM, yyyy', style: { font: 'Poppins-SemiBold', size: 11.9, color: '#000000' } },
     // The design has the date on the left with the salutation right under it, so the reference sits on the date row, right-aligned.
     reference: { y: 194, x: 535.7, align: 'right', style: { font: 'Poppins-Regular', size: 8, color: '#6b7280' } },
+    pageFooterStyle: { font: 'Poppins-Regular', size: 8, color: '#6b7280' },
     subject: { y: 208.3, prefix: 'Subject: ', bodyTop: 232.5, style: { font: 'Poppins-SemiBold', size: 11.9, color: '#000000' } },
     body: {
         top: 208.3, left: 59.5, right: 537.6,
@@ -260,6 +272,7 @@ const smbDigitalZone: Letterhead = {
         // The bottom-left corner starts at y 760 at the left margin (783 at x 80): keep body text well clear of it.
         bodyBottom: 700,
         blockBottom: 785,
+        pageFooter: { x: 538.6, y: 800, align: 'right' },   // right side, below the signature block; corners are on the left
     },
     // Continuation: background, watermark and the corner shapes, without the navy band and logo.
     next: {
@@ -271,11 +284,13 @@ const smbDigitalZone: Letterhead = {
         top: 96,              // the top-right corner reaches y 80 at the right margin
         bodyBottom: 700,      // same clearance from the bottom-left corner as page 1
         blockBottom: 785,
+        pageFooter: { x: 538.6, y: 800, align: 'right' },
     },
 
     title: { y: 162.9, centerX: 297.65, uppercase: true, style: { font: 'Mulish-Bold', size: 27, color: '#113e7a' } },
     date: { y: 225.7, x: 535.7, align: 'right', prefix: 'Date: ', format: 'MMMM d, yyyy', style: { font: 'Mulish-Regular', size: 11, color: '#0d2648' } },
     reference: { y: 241, x: 535.7, align: 'right', style: { font: 'Mulish-Regular', size: 8, color: '#5b6b80' } },
+    pageFooterStyle: { font: 'Mulish-Regular', size: 8, color: '#5b6b80' },
     recipient: {
         label: 'To:', x: 59.5,
         labelY: 226.1, labelStyle: { font: 'Mulish-Bold', size: 12, color: '#0d2648' },

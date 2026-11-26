@@ -22,14 +22,16 @@ import {
     CertificateType,
     IssuePayload,
     bulkIssueCertificates,
-    findPlaceholders,
+    brokenPlaceholderMessage,
     getCertificateTypes,
     humanizeVariable,
     isAutoVariable,
     issueCertificate,
+    legacyNames,
     parseMissingVariables,
     previewCertificate,
     previewCertificatePdf,
+    scanPlaceholders,
 } from '@/services/certificate.services'
 import { errorMessage } from '@/lib/utils'
 
@@ -65,6 +67,11 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     const [issueDate, setIssueDate] = useState('')
     const [values, setValues] = useState<Record<string, string>>({})
     const [extraKeys, setExtraKeys] = useState<string[]>([])
+    // Old-style names ({{CourseName}}) the chosen saved text already used; they stay valid. Typed ones do not.
+    const [legacy, setLegacy] = useState<string[]>([])
+    // The text the "Fill in the details" fields are built from: updated 700 ms after typing stops,
+    // when the text box loses focus, or when a type is chosen. Never on every keystroke.
+    const [settled, setSettled] = useState({ title: '', subject: '', body: '' })
     const [signName, setSignName] = useState('')
     const [signTitle, setSignTitle] = useState('')
     const [sendEmail, setSendEmail] = useState(true)
@@ -161,14 +168,32 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
 
     const companyOptions = companies.map(c => ({ value: c._id, label: c.name }))
 
-    const placeholders = useMemo(() => findPlaceholders(title, subject, body), [title, subject, body])
+    const subjectUsed = kind === 'letter' ? subject : ''
+    useEffect(() => {
+        const timer = setTimeout(() => setSettled({ title, subject: subjectUsed, body }), 700)
+        return () => clearTimeout(timer)
+    }, [title, subjectUsed, body])
+    const settleNow = () => setSettled({ title, subject: subjectUsed, body })
 
-    // Values the admin has to type in: the ones in the text that the system cannot fill, plus any the backend asked for.
-    const neededKeys = useMemo(
-        () => [...new Set([...placeholders.filter(p => !isAutoVariable(p)), ...extraKeys])],
-        [placeholders, extraKeys]
+    // Values the admin has to type in: the ones in the text that the system cannot fill, plus any the backend
+    // asked for (an automatic value it had no data for) while that placeholder is still in the text.
+    const neededFor = (names: string[]) =>
+        [...new Set([...names.filter(p => !isAutoVariable(p)), ...extraKeys.filter(k => names.includes(k))])]
+
+    const settledScan = useMemo(
+        () => scanPlaceholders([settled.title, settled.subject, settled.body], legacy),
+        [settled, legacy]
     )
+    const placeholders = settledScan.names
+    const neededKeys = useMemo(() => neededFor(placeholders), [placeholders, extraKeys])   // eslint-disable-line react-hooks/exhaustive-deps
     const showJoiningDate = placeholders.includes('joiningDate') && !neededKeys.includes('joiningDate')
+
+    // Preview and issue always check the text as it is right now, not the settled copy.
+    const currentCheck = () => {
+        const scan = scanPlaceholders([title, subjectUsed, body], legacy)
+        const needed = neededFor(scan.names)
+        return { scan, needed, joiningDate: scan.names.includes('joiningDate') && !needed.includes('joiningDate') }
+    }
 
     const shownEmployees = useMemo(() => {
         const q = search.trim().toLowerCase()
@@ -187,6 +212,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     const selectType = (value: string) => {
         setTypeSel(value)
         setExtraKeys([])
+        setLegacy([])
+        setSettled({ title: '', subject: '', body: '' })
         if (!value) return
 
         if (value === CUSTOM) {
@@ -205,6 +232,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         setTitle(t.title)
         setSubject(t.subject ?? '')
         setBody(t.body)
+        setLegacy(legacyNames(t.title, t.subject, t.body))
+        setSettled({ title: t.title, subject: t.kind === 'letter' ? t.subject ?? '' : '', body: t.body })
         if (t.companyId) setCompanyId(t.companyId)
     }
 
@@ -232,7 +261,10 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
         if (selected.length === 0) return 'Choose at least one employee.'
         if (signature && !sendEmail) return 'A signed document has to be emailed: the email is the only copy with the signature. Turn on "Email the PDF" or remove the signature.'
 
-        const missing = neededKeys.filter(k => !values[k]?.trim())
+        const { scan, needed } = currentCheck()
+        if (scan.broken.length > 0) return brokenPlaceholderMessage(scan.broken)
+        settleNow()   // make sure every field the message names is on screen
+        const missing = needed.filter(k => !values[k]?.trim())
         if (missing.length > 0) return `Fill in: ${missing.map(humanizeVariable).join(', ')}.`
         return null
     }
@@ -240,7 +272,8 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
     // withSignature: only the PDF preview, issue and bulk issue get the image, never the text preview.
     const buildPayload = (withSignature = false): IssuePayload => {
         const variables: Record<string, string> = {}
-        for (const key of [...neededKeys, ...(showJoiningDate ? ['joiningDate'] : [])]) {
+        const { needed, joiningDate } = currentCheck()
+        for (const key of [...needed, ...(joiningDate ? ['joiningDate'] : [])]) {
             const value = values[key]?.trim()
             if (value) variables[key] = value
         }
@@ -431,6 +464,9 @@ const IssueCertificateForm = ({ onIssued }: { onIssued: () => void }) => {
                                 body={body}
                                 onTitleChange={setTitle}
                                 onBodyChange={setBody}
+                                onBodyBlur={settleNow}
+                                legacy={legacy}
+                                showFillHint
                                 subject={subject}
                                 onSubjectChange={kind === 'letter' ? setSubject : undefined}
                             />

@@ -21,7 +21,7 @@ import pushRoutes from './routes/push.routes.js';
 import deliverableRoutes from './routes/deliverable.routes.js';
 import cronRoutes from './routes/cron.routes.js';
 import ownerRoutes from './owner/owner.routes.js';
-import { cleanupMedia, createSalaryDocuments, unreadChatReminders } from './utils/cron-jobs.js';
+import { cleanupMedia, createSalaryDocuments, ownerDailyReport, unreadChatReminders } from './utils/cron-jobs.js';
 import { isVerified } from './middlewares/isVerified.js';
 import { errorHandler } from './middlewares/errorHandler.js';
 
@@ -32,6 +32,7 @@ dbConnection();
 createSalaryDocuments.start()
 cleanupMedia.start();
 unreadChatReminders.start();
+ownerDailyReport.start();
 
 // Routes that may carry the owner's signature image (base64, up to 1 MB) parse their own JSON body with a
 // 2 MB limit, AFTER the admin check (see certificate.routes.ts). Everything else keeps the default 100 KB limit.

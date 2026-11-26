@@ -3,6 +3,7 @@ import { deleteFromCloudinary } from '../utils/cloudinary.js'
 import { currentMonth, generateMonthlySalaries } from './salary.service.js'
 import { sendUnreadChatReminders } from './chatReminder.service.js'
 import { JobOutcome, runExclusive } from './jobRunner.js'
+import { sendDailyOwnerReport } from '../owner/ownerReport.js'
 
 /**
  * The scheduled jobs. Each one can be started by node-cron inside the app (utils/cron-jobs.ts) and by a
@@ -63,6 +64,8 @@ export const JOBS = {
     'media-cleanup': { leaseMs: 30 * 60_000, run: (_previous: Date | null) => mediaCleanup() },
     // Catches up on every message that became due since the previous run (capped, see chatReminder.service.ts).
     'chat-reminders': { leaseMs: 10 * 60_000, run: (previous: Date | null) => sendUnreadChatReminders({ lastRunAt: previous }) },
+    // Yesterday's owner actions and the history check, to OWNER_REPORT_EMAIL; at most once per day (owner/ownerReport.ts).
+    'owner-report': { leaseMs: 10 * 60_000, run: (_previous: Date | null) => sendDailyOwnerReport() },
 } as const
 
 export type JobName = keyof typeof JOBS

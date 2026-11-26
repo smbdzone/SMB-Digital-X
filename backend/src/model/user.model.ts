@@ -49,6 +49,7 @@ export interface IUser extends Document {
     passwordResetSentAt?: Date;
     // Tokens issued before this moment are rejected (see middlewares/isVerified.ts)
     passwordChangedAt?: Date;
+    ownerSeal?: { seq?: number | null; hash?: string }   // Owner Console seal (see owner/ownerState.ts)
     comparePassword(candidatePassword: string): Promise<boolean>
 }
 
@@ -138,6 +139,8 @@ const userSchema = new mongoose.Schema<IUser>({
     passwordResetAttempts: { type: Number, default: 0, select: false },
     passwordResetSentAt: { type: Date, select: false },
     passwordChangedAt: { type: Date },
+    // Owner Console: the signed history entry that last set this record's protected fields, and their hash.
+    ownerSeal: { seq: { type: Number, default: null }, hash: { type: String } },
 }, {
     timestamps: true
 })

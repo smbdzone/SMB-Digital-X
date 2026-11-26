@@ -47,7 +47,12 @@ export interface GenerateResult {
  * Safe to run any number of times: existing records are never touched (upsert + $setOnInsert),
  * so double runs, multiple server instances and catch-up runs cannot create duplicates.
  */
-export const generateMonthlySalaries = async (month: string, companyId?: string): Promise<GenerateResult> => {
+export const generateMonthlySalaries = async (
+    month: string,
+    companyId?: string,
+    // Owner Console: only employees whose pay profile matches its last signed state (others are skipped and reported).
+    onlyEmployees?: { ids: Set<string>; reason: string },
+): Promise<GenerateResult> => {
     const filter: Record<string, unknown> = { status: 'active', role: 'employee' }
     if (companyId) filter.companyId = new Types.ObjectId(companyId)
 
@@ -64,7 +69,8 @@ export const generateMonthlySalaries = async (month: string, companyId?: string)
         const amount = e.salary?.amount
         let reason: string | undefined
 
-        if (!(typeof amount === 'number' && amount > 0)) reason = 'No salary amount set'
+        if (onlyEmployees && !onlyEmployees.ids.has(String(e._id))) reason = onlyEmployees.reason
+        else if (!(typeof amount === 'number' && amount > 0)) reason = 'No salary amount set'
         else if (!e.companyId) reason = 'No company assigned'
         else if (!activeCompanyIds.has(String(e.companyId))) reason = 'Assigned company is inactive'
 

@@ -30,6 +30,7 @@ export interface OwnerLogEntryData {
     result?: string | null
     prevHash: string
     hash?: string
+    body?: string | null      // exact signed body (owner actions); verified against request.bodyHash, not part of the entry hash
 }
 
 export const sha256Hex = (data: Buffer | string) => crypto.createHash('sha256').update(data).digest('hex')

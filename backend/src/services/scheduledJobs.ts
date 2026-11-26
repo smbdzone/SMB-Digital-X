@@ -4,6 +4,7 @@ import { currentMonth, generateMonthlySalaries } from './salary.service.js'
 import { sendUnreadChatReminders } from './chatReminder.service.js'
 import { JobOutcome, runExclusive } from './jobRunner.js'
 import { sendDailyOwnerReport } from '../owner/ownerReport.js'
+import { signedProfileFilter } from '../owner/ownerRecords.js'
 
 /**
  * The scheduled jobs. Each one can be started by node-cron inside the app (utils/cron-jobs.ts) and by a
@@ -21,7 +22,8 @@ const MEDIA_MAX_AGE_MS = 48 * 60 * 60 * 1000
 const payroll = async () => {
     const timeZone = PAYROLL_TIMEZONE()
     const month = currentMonth(timeZone)
-    const result = await generateMonthlySalaries(month)
+    // Once people are adopted in the Owner Console, only signed pay profiles are used.
+    const result = await generateMonthlySalaries(month, undefined, await signedProfileFilter())
     const summary = { month, timeZone, created: result.created, alreadyExisted: result.alreadyExisted, skipped: result.skipped.length }
     console.log(`[payroll] ${month} (${timeZone}) -> created ${summary.created}, already existed ${summary.alreadyExisted}, skipped ${summary.skipped}`)
     return summary

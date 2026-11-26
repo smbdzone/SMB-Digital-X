@@ -50,7 +50,7 @@ export const getOwnerKey = () => OwnerKey.findById(OWNER_KEY_ID).lean<IOwnerKey>
 /* ------------------------------------------------------------------ */
 
 /** Appends one entry to the owner history (hash-chained). Safe when two requests append at the same moment. */
-export const appendOwnerLog = async (input: { action: string; recordId?: string | null; request: SignedRequest; result?: unknown }): Promise<OwnerLogEntryData> => {
+export const appendOwnerLog = async (input: { action: string; recordId?: string | null; request: SignedRequest; result?: unknown; body?: string | null }): Promise<OwnerLogEntryData> => {
     for (let attempt = 0; attempt < 10; attempt++) {
         const last = await OwnerLog.findOne().sort({ seq: -1 }).select('seq hash').lean()
         const entry: OwnerLogEntryData = {
@@ -64,7 +64,7 @@ export const appendOwnerLog = async (input: { action: string; recordId?: string 
         }
         entry.hash = entryHash(entry)
         try {
-            await OwnerLog.create(entry)
+            await OwnerLog.create({ ...entry, body: input.body ?? null })
             return entry
         } catch (error) {
             if ((error as { code?: number })?.code === 11000) continue   // someone else took this number: read again

@@ -43,6 +43,7 @@ export interface ICertificate extends Document {
         lastAttemptAt?: Date
         error?: string
     }
+    ownerSeal?: { seq?: number | null; hash?: string }   // Owner Console seal (see owner/ownerState.ts)
     createdAt: Date
     updatedAt: Date
 }
@@ -93,6 +94,7 @@ const certificateSchema = new Schema<ICertificate>(
             lastAttemptAt: { type: Date },
             error: { type: String },
         },
+        ownerSeal: { type: Schema.Types.Mixed, default: undefined },   // { seq, hash }: only set by a signed Owner Console action
     },
     { timestamps: true }
 )

@@ -40,7 +40,7 @@ router.use((req: Request, res: Response, next: NextFunction) => {
         res.set('Vary', 'Origin')
         if (req.method === 'OPTIONS') {
             res.set('Access-Control-Allow-Methods', 'GET, POST, PUT')
-            res.set('Access-Control-Allow-Headers', 'Content-Type, X-Owner-Ts, X-Owner-Nonce, X-Owner-Sig')
+            res.set('Access-Control-Allow-Headers', 'Content-Type, X-Owner-Ts, X-Owner-Nonce, X-Owner-Sig, X-Owner-Attachment')
             res.set('Access-Control-Max-Age', '600')
         }
     }

@@ -13,6 +13,7 @@ export interface IProject extends Document {
 
     employees: mongoose.Types.ObjectId[]
 
+    ownerSeal?: { seq?: number | null; hash?: string }   // Owner Console seal (see owner/ownerState.ts)
     createdAt: Date
     updatedAt: Date
 }
@@ -72,7 +73,8 @@ const projectSchema = new Schema<IProject>(
                 type: Schema.Types.ObjectId,
                 ref: 'users'
             }
-        ]
+        ],
+        ownerSeal: { type: Schema.Types.Mixed, default: undefined },   // { seq, hash }: only set by a signed Owner Console action
     },
     {
         timestamps: true

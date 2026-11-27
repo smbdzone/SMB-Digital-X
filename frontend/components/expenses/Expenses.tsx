@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
 import {
     FiCheck, FiEdit, FiEye, FiPaperclip, FiPlus, FiSearch, FiTrash2, FiX,
 } from "react-icons/fi";
@@ -221,7 +222,8 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
     };
 
     /* ---------- permissions & options ---------- */
-    const canEdit = (e: Expense) => isAdmin || (expenseOwnerId(e) === myId && e.status === "pending");
+    // Everyone (the admin too) edits only their own pending expenses here; deciding and deleting are in the Owner Console.
+    const canEdit = (e: Expense) => expenseOwnerId(e) === myId && e.status === "pending";
 
     const assignedProjects = useMemo(
         // Employees get `isMember` from the API (the member list itself is admin-only)
@@ -434,7 +436,10 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
                         {fullPage ? (isAdmin ? "Expenses" : "My expenses") : "Project expenses"}
                     </h4>
                     {fullPage && !isAdmin && (
-                        <p className="mt-1 text-sm text-charcoal/45">New expenses are reviewed by an admin. You can edit them while they are pending.</p>
+                        <p className="mt-1 text-sm text-charcoal/45">New expenses are reviewed by the owner. You can edit them while they are pending.</p>
+                    )}
+                    {isAdmin && (
+                        <OwnerConsoleNote className="mt-2">Approving, rejecting, editing and deleting expenses are done in the Owner Console. Your own new expenses wait for approval there too.</OwnerConsoleNote>
                     )}
                 </div>
                 <ButtonEmerald icon={<FiPlus className="size-4" />} onClick={openCreate} className="!h-11">
@@ -569,17 +574,8 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
                                         <td className="whitespace-nowrap px-4 py-4">
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => setDetail(expense)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title="View"><FiEye className="size-4" /></button>
-                                                {isAdmin && expense.status === "pending" && (
-                                                    <>
-                                                        <button onClick={() => startAction(expense, "approved")} disabled={busy} className="rounded-lg p-2 text-emerald-600 transition hover:bg-emerald-50 disabled:opacity-40" title="Approve"><FiCheck className="size-4" /></button>
-                                                        <button onClick={() => startAction(expense, "rejected")} disabled={busy} className="rounded-lg p-2 text-amber-600 transition hover:bg-amber-50 disabled:opacity-40" title="Reject"><FiX className="size-4" /></button>
-                                                    </>
-                                                )}
                                                 {canEdit(expense) && (
                                                     <button onClick={() => openEdit(expense)} className="rounded-lg p-2 text-charcoal/60 transition hover:bg-charcoal/5" title="Edit"><FiEdit className="size-4" /></button>
-                                                )}
-                                                {isAdmin && (
-                                                    <button onClick={() => handleDelete(expense)} disabled={busy} className="rounded-lg p-2 text-red-600 transition hover:bg-red-50 disabled:opacity-40" title="Delete"><FiTrash2 className="size-4" /></button>
                                                 )}
                                             </div>
                                         </td>

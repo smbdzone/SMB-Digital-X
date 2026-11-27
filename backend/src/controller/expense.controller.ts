@@ -1,4 +1,5 @@
 import { Request, Response } from 'express'
+import { OWNER_CONSOLE_ONLY } from '../middlewares/ownerConsoleOnly.js'
 import { Types } from 'mongoose'
 import Expense, { EXPENSE_CATEGORIES, EXPENSE_STATUSES, ExpenseCategory, ExpenseStatus, PAYMENT_METHODS } from '../model/expense.model.js'
 import Project from '../model/project.model.js'
@@ -35,7 +36,7 @@ const asTaxes = (value: unknown): { name: string; percentage: number }[] => {
 }
 
 // One place for the tax maths (it used to be copy-pasted in create and update). Uses integer cents.
-const computeTaxes = (amount: number, taxes: { name: string; percentage: number }[]) => {
+export const computeTaxes = (amount: number, taxes: { name: string; percentage: number }[]) => {
     const amountCents = toCents(amount)
     const calculated = taxes.map(t => ({
         name: t.name,
@@ -144,9 +145,8 @@ export const createExpenseController = async (req: Request, res: Response): Prom
         currency: b.currency !== undefined ? asCurrency(b.currency) : 'AED',
         date: b.date !== undefined ? asDate(b.date) : new Date(),
         notes: asText(b.notes, 'notes', { max: 2000 }),
-        // An admin's own expense is approved immediately; an employee's waits for approval.
-        status: isAdmin(auth) ? 'approved' : 'pending',
-        ...(isAdmin(auth) ? { approvedBy: auth.id, approvedAt: new Date() } : {}),
+        // Every new expense waits for approval in the Owner Console (the admin's own ones too).
+        status: 'pending',
     })
 
     const populated = await populateExpense(Expense.findById(expense._id))
@@ -239,10 +239,11 @@ export const updateExpenseController = async (req: Request, res: Response): Prom
 
     const existing = await findVisibleExpense(id, auth)
 
-    if (!isAdmin(auth)) {
-        if (existing.status !== 'pending') throw forbidden('Only pending expenses can be edited. Ask an admin to change it.')
-        if (b.companyId !== undefined) throw forbidden('Only an admin can change the company of an expense')
-    }
+    // On the website, people edit only their OWN PENDING expenses (the admin too). Approving, rejecting, editing
+    // someone else's expense or a decided one, and deleting are done in the Owner Console.
+    if (String(existing.addedBy) !== auth.id) throw forbidden(isAdmin(auth) ? OWNER_CONSOLE_ONLY : 'You can only edit your own expenses')
+    if (existing.status !== 'pending') throw forbidden(isAdmin(auth) ? OWNER_CONSOLE_ONLY : 'Only pending expenses can be edited.')
+    if (b.companyId !== undefined && !isAdmin(auth)) throw forbidden('Only an admin can change the company of an expense')
 
     const amount = b.amount !== undefined ? asAmount(b.amount, 'amount') : existing.amount
     const taxInput = b.taxes !== undefined
@@ -317,7 +318,7 @@ const RECEIPT_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'application/pdf
 export const uploadReceiptController = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const expense = await findVisibleExpense(paramId(req), auth)
-    if (!isAdmin(auth) && expense.status !== 'pending') throw forbidden('Receipts can only be added while the expense is pending')
+    if (expense.status !== 'pending') throw forbidden('Receipts can only be added while the expense is pending')
 
     const file = req.file
     if (!file) throw badRequest('Attach a file in the "receipt" field')
@@ -346,7 +347,7 @@ export const uploadReceiptController = async (req: Request, res: Response): Prom
 export const deleteReceiptController = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const expense = await findVisibleExpense(paramId(req), auth)
-    if (!isAdmin(auth) && expense.status !== 'pending') throw forbidden('Receipts can only be removed while the expense is pending')
+    if (expense.status !== 'pending') throw forbidden('Receipts can only be removed while the expense is pending')
 
     const receipt = expense.receipts.find(r => String(r._id) === paramId(req, 'receiptId'))
     if (!receipt) throw notFound('Receipt not found')

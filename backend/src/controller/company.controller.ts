@@ -12,7 +12,7 @@ const present = <T extends { logo?: string; letterhead?: string | null; code?: s
     ({ ...withLogoUrl(c), letterheadDesign: letterheadDesignFor(c) })
 
 // Builds a validated field set. On update only the fields that were sent are included.
-const buildCompanyFields = (b: any, mode: 'create' | 'update') => {
+export const buildCompanyFields = (b: any, mode: 'create' | 'update') => {
     const f: Record<string, unknown> = {}
     const name = mode === 'create'
         ? asText(b.name, 'name', { required: true, max: 100 })

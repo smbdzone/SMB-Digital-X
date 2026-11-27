@@ -8,6 +8,7 @@ import ButtonEmerald from '../ui/ButtonEmerald';
 import Input from '../ui/Input';
 import SelectField from '../ui/SelectField';
 import { TextAreaField } from '@/components/ui/shared';
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/context/ToastContext';
 import { useCompanies } from '@/hooks/useCompanies';
@@ -201,8 +202,8 @@ const Companies = () => {
                     <h4 className="text-md font-bold font-heading sm:text-xl">Companies</h4>
                     <p className="mt-1 text-sm text-charcoal/45">Branding and email settings used on salary slips.</p>
                 </div>
-                <ButtonEmerald icon={<FiPlus className="size-4" />} onClick={openCreate}>Add company</ButtonEmerald>
             </div>
+            <OwnerConsoleNote className="mb-5">Adding and changing companies (details, contacts, signatory, letterhead, logo) is done in the Owner Console.</OwnerConsoleNote>
 
             {loading && !companies.length ? (
                 <p className="py-10 text-center text-sm text-charcoal/50">Loading...</p>
@@ -245,8 +246,6 @@ const Companies = () => {
                                     <button onClick={() => toggleActive(company)} className="rounded-lg px-3 py-2 text-xs font-semibold text-charcoal/60 transition hover:bg-charcoal/5">
                                         {company.isActive ? 'Deactivate' : 'Activate'}
                                     </button>
-                                    <button onClick={() => openEdit(company)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title="Edit"><FiEdit className="size-4" /></button>
-                                    <button onClick={() => handleDelete(company._id)} className="rounded-lg p-2 text-red-600 transition hover:bg-red-50 disabled:opacity-40" title="Delete"><FiTrash2 className="size-4" /></button>
 
                                 </div>
                             </div>

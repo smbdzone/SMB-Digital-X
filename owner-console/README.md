@@ -8,7 +8,9 @@ unlocked keys exist only in his browser.
 | File | What it is |
 |---|---|
 | `src/crypto.js` | All cryptography (browser WebCrypto only). Also imported by the Node tests. The backend's `src/owner/signing.ts` implements the same formats. |
-| `src/app.js` | The screens: setup, login, forgot passphrase, Payroll, People, Requests, Verify everything (history and records, Adopt), Settings. |
+| `src/app.js` | The frame and the first screens: setup, login, forgot passphrase, Payroll, People, Requests, Verify everything (history and records, Adopt), Settings. |
+| `src/screens.js` | Companies, Projects (budgets and milestone payments), Expenses and Letters. |
+| `src/signature.js` | The signature picker's background removal (same as the website's `lib/signatureClean.ts`). The image is kept in memory only and dropped on lock. |
 | `src/integrity.js` | Owner records: canonical form, state hash, salary totals and the records check (same rules as the backend's `src/owner/ownerState.ts`). |
 | `src/index.html`, `src/style.css` | Page template (strict Content-Security-Policy) and the look (deliberately unlike the website). |
 | `src/data/eff_large_wordlist.txt` | EFF large word list (7,776 words, CC BY 3.0 US, Electronic Frontier Foundation) for "Suggest a passphrase". |
@@ -25,7 +27,8 @@ It prints the version and the file's SHA-256 and writes `dist/…html.sha256.txt
 `dist/` is not committed. The version is in `package.json`; bump it for every release.
 
 The file's Content-Security-Policy allows only its own inline script and style (by hash), and network requests only
-to the API host: no remote scripts, fonts, images or frames.
+to the API host: no remote scripts or fonts. Images and frames are allowed only from `data:`/`blob:` (memory): the
+cleaned signature shown before issuing, and the PDF preview the console fetched itself.
 
 ## Tests
 
@@ -50,6 +53,17 @@ node --test owner-console/test/crypto.test.mjs owner-console/test/integrity.test
 
 Version 1.1.0 (Phase 1b-i) adds Payroll, People, bank details Requests, the records check and "Adopt current records".
 The 1.0.0 file can no longer pay salaries (that pilot endpoint was replaced), so replace it before the next payroll.
+
+Version 1.2.0 (Phase 1b-ii) adds Companies, Projects (budgets and milestone payments), Expenses (approve, reject,
+reimburse, edit, delete) and Letters (preview with the letterhead PDF, issue single and bulk, revoke, resend, with the
+signature picker). After installing it, run **Verify everything** and **Adopt** once for the new record types
+(companies, budgets, milestone payments, expenses, letters); check the counts and totals in the summary first.
+
+### Attachments (signature image, logo)
+A file is never part of what the server stores. The request body is `{ "signed": "<the signed JSON>", "attachment":
+"<base64>" }` with the header `X-Owner-Attachment: 1`. Only the `signed` text is hashed and signed; it names the
+file's SHA-256 (`signatureSha256` or `attachmentSha256`). The server checks the file against that hash, uses it once
+and wipes it; the owner history keeps only the signed text (so only the hash).
 
 ## Keys and settings in brief
 - Passphrase: PBKDF2-SHA256, 3,000,000 iterations, random salt → AES-256-GCM key that locks the vault key (AES-256-GCM)

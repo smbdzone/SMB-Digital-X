@@ -28,8 +28,9 @@ const common = read('data/common-phrases.txt').split('\n').map(l => l.trim()).fi
 const cryptoCode = read('crypto.js').replace(/^export /gm, '')
 // integrity.js imports from crypto.js (for the tests); in the page both share one scope.
 const integrityCode = read('integrity.js').replace(/^import .*$/gm, '').replace(/^export /gm, '')
+const signatureCode = read('signature.js').replace(/^export /gm, '')
 const BUILD = { api, version, words, common }
-const script = `(() => {\n'use strict';\nconst BUILD = ${JSON.stringify(BUILD)};\n${cryptoCode}\n${integrityCode}\n${read('app.js')}\n})();\n`
+const script = `(() => {\n'use strict';\nconst BUILD = ${JSON.stringify(BUILD)};\n${cryptoCode}\n${integrityCode}\n${signatureCode}\n${read('screens.js')}\n${read('app.js')}\n})();\n`
 const style = read('style.css')
 if (/<\/(script|style)/i.test(script + style)) throw new Error('Inline code must not contain a closing script/style tag')
 
@@ -39,12 +40,12 @@ const csp = [
     `script-src ${cspHash(script)}`,
     `style-src ${cspHash(style)}`,
     `connect-src ${apiOrigin}`,
-    'img-src data:',
+    'img-src data: blob:',            // the cleaned signature shown before issuing
     "font-src 'none'",
     "base-uri 'none'",
     "form-action 'none'",
     "object-src 'none'",
-    "frame-src 'none'",
+    'frame-src blob:',                // the signed PDF preview, fetched by the console and shown from memory
     "worker-src 'none'",
     "manifest-src 'none'",
 ].join('; ')

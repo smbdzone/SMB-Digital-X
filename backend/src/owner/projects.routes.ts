@@ -7,6 +7,7 @@ import { appendOwnerLog } from './owner.service.js'
 import { bodyText, jsonBody, owner, requireOwner } from './ownerHttp.js'
 import { assertCanonical, setSealSeq } from './ownerRecords.js'
 import { canonicalJson, keyOf, milestoneState, parseKey, projectState } from './ownerState.js'
+import { isLocked, looksLocked, vaultStarted } from './vault.js'
 
 /*
  * Project money from the Owner Console (signed, sealed). The website keeps everything else about projects and
@@ -16,7 +17,19 @@ import { canonicalJson, keyOf, milestoneState, parseKey, projectState } from './
  *   POST /projects/delete       { action: 'project.delete', changes: [project and every milestone of it, state null] }
  *   POST /milestones/payment    { action: 'milestone.payment', changes: [{ key: 'milestones/<id>', state }] }
  *   POST /milestones/delete     { action: 'milestone.delete', changes: [{ key: 'milestones/<id>', state: null }] }
+ *
+ * Phase 2: once locking has started, the budget and the milestone percentage and amount must be locked values (the
+ * console locks them before signing; the server cannot read them). The money rules (0 or more, at most 100% in total,
+ * percentage and amount matching the budget) are then checked in the console only. Before that, plain numbers as before.
  */
+const LOCKED_NEEDED = 'Locking has started: the console must send this amount locked. Use Owner Console v1.3.0 or later.'
+/** Plain before locking started, locked after; refuses the other form. Returns true when the value is locked. */
+const moneyForm = async (values: unknown[]) => {
+    const started = await vaultStarted()
+    if (started && !values.every(isLocked)) throw badRequest(values.some(looksLocked) ? 'Unknown locked value format' : LOCKED_NEEDED)
+    if (!started && values.some(v => typeof v === 'string')) throw badRequest('Amounts can be locked only after "Lock existing data" has started')
+    return started
+}
 const router = Router()
 
 /** Share of the budget a milestone takes (same rule as the website: the typed value wins, the other follows). */
@@ -47,10 +60,13 @@ router.post('/projects/budget', requireOwner, async (req, res) => {
     const { type, id, hash } = assertCanonical(c?.key, c?.state)
     if (type !== 'projects') throw badRequest('Not a project')
     const budget = c.state.budget
-    if (!(budget >= 0) || round2(budget) !== budget) throw badRequest('The budget must be an amount of 0 or more')
+    const locked = await moneyForm([budget])
+    if (!locked && (!(budget >= 0) || round2(budget) !== budget)) throw badRequest('The budget must be an amount of 0 or more')
     if (!(await Project.exists({ _id: id }))) throw notFound('Project not found')
-    const used = (await Milestone.find({ projectId: id }).lean()).reduce((s, m) => s + percentOf(m, budget), 0)
-    if (used > 100.0001) throw conflict(`With this budget the milestone payments would be ${round2(used)}% of it. Lower them first.`)
+    if (!locked) {
+        const used = (await Milestone.find({ projectId: id }).lean()).reduce((s, m) => s + percentOf(m, budget), 0)
+        if (used > 100.0001) throw conflict(`With this budget the milestone payments would be ${round2(used)}% of it. Lower them first.`)
+    }
     await Project.updateOne({ _id: id }, { $set: { budget, ownerSeal: { seq: null, hash } } })
     const entry = await record(req, res, 'project.budget', [c.key], id)
     res.json({ success: true, data: { log: { seq: entry.seq, head: entry.hash } } })
@@ -82,18 +98,21 @@ router.post('/milestones/payment', requireOwner, async (req, res) => {
     const m = await Milestone.findById(id).lean()
     if (!m) throw notFound('Milestone not found')
     if (s.projectId !== String(m.projectId)) throw badRequest('A milestone cannot move to another project')
-    const project = await Project.findById(m.projectId).select('budget').lean()
-    const budget = project?.budget ?? 0
     if (s.paymentMode !== 'percentage' && s.paymentMode !== 'amount') throw badRequest("paymentMode must be 'percentage' or 'amount'")
-    if (!(s.paymentPercentage >= 0 && s.paymentPercentage <= 100) || !(s.paymentAmount >= 0)) throw badRequest('Payment must be 0-100% and an amount of 0 or more')
-    const expected = s.paymentMode === 'percentage'
-        ? { paymentPercentage: s.paymentPercentage, paymentAmount: round2(budget * s.paymentPercentage / 100) }
-        : { paymentPercentage: budget > 0 ? round2(s.paymentAmount / budget * 100) : 0, paymentAmount: s.paymentAmount }
-    if (expected.paymentPercentage !== s.paymentPercentage || expected.paymentAmount !== s.paymentAmount) throw badRequest(`Percentage and amount do not match the project budget (${budget})`)
-    if (s.paymentMode === 'amount' && budget <= 0 && s.paymentAmount > 0) throw badRequest('The project budget is 0. Set a budget first')
-    const others = await Milestone.find({ projectId: m.projectId, _id: { $ne: id } }).lean()
-    const used = others.reduce((sum, o) => sum + percentOf(o, budget), 0) + percentOf(s, budget)
-    if (used > 100.0001) throw conflict(`Milestone payments cannot exceed 100% of the project budget (this makes ${round2(used)}%)`)
+    // After locking started these rules run in the console (the server cannot read the amounts).
+    if (!(await moneyForm([s.paymentPercentage, s.paymentAmount]))) {
+        const project = await Project.findById(m.projectId).select('budget').lean()
+        const budget = typeof project?.budget === 'number' ? project.budget : 0
+        if (!(s.paymentPercentage >= 0 && s.paymentPercentage <= 100) || !(s.paymentAmount >= 0)) throw badRequest('Payment must be 0-100% and an amount of 0 or more')
+        const expected = s.paymentMode === 'percentage'
+            ? { paymentPercentage: s.paymentPercentage, paymentAmount: round2(budget * s.paymentPercentage / 100) }
+            : { paymentPercentage: budget > 0 ? round2(s.paymentAmount / budget * 100) : 0, paymentAmount: s.paymentAmount }
+        if (expected.paymentPercentage !== s.paymentPercentage || expected.paymentAmount !== s.paymentAmount) throw badRequest(`Percentage and amount do not match the project budget (${budget})`)
+        if (s.paymentMode === 'amount' && budget <= 0 && s.paymentAmount > 0) throw badRequest('The project budget is 0. Set a budget first')
+        const others = await Milestone.find({ projectId: m.projectId, _id: { $ne: id } }).lean()
+        const used = others.reduce((sum, o) => sum + percentOf(o, budget), 0) + percentOf(s, budget)
+        if (used > 100.0001) throw conflict(`Milestone payments cannot exceed 100% of the project budget (this makes ${round2(used)}%)`)
+    }
     if (!/^[A-Z]{3}$/.test(s.currency)) throw badRequest('currency must be a 3-letter code')
     if (!MILESTONE_PAYMENT_STATUSES.includes(s.paymentStatus)) throw badRequest('Unknown payment status')
     const dates = s.paymentStatus === 'paid' ? !!(s.invoicedAt && s.paidAt) : s.paymentStatus === 'invoiced' ? !!s.invoicedAt && !s.paidAt : !s.invoicedAt && !s.paidAt

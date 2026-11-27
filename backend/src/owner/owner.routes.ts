@@ -20,7 +20,9 @@ import companiesRoutes from './companies.routes.js'
 import projectsRoutes from './projects.routes.js'
 import expensesRoutes from './expenses.routes.js'
 import lettersRoutes from './letters.routes.js'
+import vaultRoutes from './vault.routes.js'
 import { assertOwnerLogProtected } from './ownerLogIndex.js'
+import { vaultFinished, vaultStarted } from './vault.js'
 
 /*
  * Owner Console API (/api/owner). Called only by the Owner Console: one local HTML file on the owner's laptop,
@@ -45,7 +47,7 @@ router.use((req: Request, res: Response, next: NextFunction) => {
         res.set('Vary', 'Origin')
         if (req.method === 'OPTIONS') {
             res.set('Access-Control-Allow-Methods', 'GET, POST, PUT')
-            res.set('Access-Control-Allow-Headers', 'Content-Type, X-Owner-Ts, X-Owner-Nonce, X-Owner-Sig, X-Owner-Attachment')
+            res.set('Access-Control-Allow-Headers', 'Content-Type, X-Owner-Ts, X-Owner-Nonce, X-Owner-Sig, X-Owner-Attachment, X-Owner-Parts')
             res.set('Access-Control-Max-Age', '600')
         }
     }
@@ -55,7 +57,11 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 
 // The signature covers the exact body bytes, so the body is kept raw and parsed here (index.ts skips its JSON parser).
 // 2 MB: "Adopt current records" sends every protected record in one signed body.
-router.use(express.raw({ type: () => true, limit: '2mb' }))
+// 8 MB only for the batch that moves old history bodies (an old adopt body alone can be close to 2 MB, and it travels
+// locked, which is a third larger).
+const rawBody = express.raw({ type: () => true, limit: '2mb' })
+const rawBodyLarge = express.raw({ type: () => true, limit: '8mb' })
+router.use((req: Request, res: Response, next: NextFunction) => (req.path === '/vault/lock-history' ? rawBodyLarge : rawBody)(req, res, next))
 /* ------------------------------------------------------------------ */
 /* Validation                                                          */
 /* ------------------------------------------------------------------ */
@@ -207,7 +213,7 @@ router.post('/login', requireOwner, async (req, res) => {
     if (!used) throw unauthorized('The login challenge is unknown, expired or already used')
     const o = owner(res)
     await appendOwnerLog({ action: 'login', request: o.request, result: { ok: true } })
-    res.json({ success: true, data: { fingerprint: o.key.fingerprint, serverTime: Date.now(), log: await ownerLogHead() } })
+    res.json({ success: true, data: { fingerprint: o.key.fingerprint, serverTime: Date.now(), log: await ownerLogHead(), vault: { started: await vaultStarted(), finished: await vaultFinished() } } })
 })
 
 // New passphrase (after "Change passphrase", or after unlocking with the recovery key): new salt and newly locked keys.
@@ -244,5 +250,6 @@ router.use(companiesRoutes)
 router.use(projectsRoutes)
 router.use(expensesRoutes)
 router.use(lettersRoutes)
+router.use(vaultRoutes)
 
 export default router

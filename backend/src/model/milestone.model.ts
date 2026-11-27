@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document, Types } from 'mongoose'
+import { isLocked } from '../owner/vault.js'
 
 export const MILESTONE_STATUSES = ['pending', 'in_progress', 'completed', 'delayed'] as const
 export const MILESTONE_PAYMENT_STATUSES = ['unpaid', 'invoiced', 'paid'] as const
@@ -27,8 +28,8 @@ export interface IMilestone extends Document {
     deadline?: Date
 
     paymentMode: PaymentMode
-    paymentPercentage: number   // share of the project budget, 0-100
-    paymentAmount: number       // money value of that share
+    paymentPercentage: number | string   // share of the project budget, 0-100 (or, Phase 2, a locked value)
+    paymentAmount: number | string       // money value of that share (or a locked value)
     currency: string
 
     deliverables: Types.DocumentArray<IDeliverable>
@@ -68,8 +69,9 @@ const milestoneSchema = new Schema<IMilestone>(
         deadline: { type: Date },
 
         paymentMode: { type: String, enum: PAYMENT_MODES, default: 'percentage' },
-        paymentPercentage: { type: Number, min: 0, max: 100, default: 0 },
-        paymentAmount: { type: Number, min: 0, default: 0 },
+        // Set in the Owner Console; once locking has started they hold locked values (owner/vault.ts).
+        paymentPercentage: { type: Schema.Types.Mixed, default: 0, validate: { validator: (v: unknown) => (typeof v === 'number' && v >= 0 && v <= 100) || isLocked(v), message: 'paymentPercentage must be 0-100 or a locked value' } },
+        paymentAmount: { type: Schema.Types.Mixed, default: 0, validate: { validator: (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0) || isLocked(v), message: 'paymentAmount must be an amount of 0 or more, or a locked value' } },
         currency: { type: String, uppercase: true, trim: true, default: 'AED' },
 
         deliverables: { type: [deliverableSchema], default: [] },

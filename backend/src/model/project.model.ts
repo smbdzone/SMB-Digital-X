@@ -1,4 +1,5 @@
 import mongoose, { Schema, Document } from 'mongoose'
+import { isLocked } from '../owner/vault.js'
 
 export interface IProject extends Document {
     name: string
@@ -8,7 +9,7 @@ export interface IProject extends Document {
     startDate: Date
     deadline?: Date
 
-    budget: number
+    budget: number | string   // a number, or (Phase 2) a locked value only the Owner Console can read
     status: 'Planning' | 'Active' | 'Completed' | 'On Hold'
 
     employees: mongoose.Types.ObjectId[]
@@ -51,10 +52,12 @@ const projectSchema = new Schema<IProject>(
             type: Date
         },
 
+        // 0 = not set yet. Set in the Owner Console; once locking has started it holds a locked value (owner/vault.ts).
         budget: {
-            type: Number,
+            type: Schema.Types.Mixed,
             required: true,
-            min: 0
+            default: 0,
+            validate: { validator: (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0) || isLocked(v), message: 'budget must be an amount of 0 or more, or a locked value' }
         },
 
         status: {

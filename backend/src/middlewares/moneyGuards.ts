@@ -3,6 +3,7 @@ import Project from '../model/project.model.js'
 import Milestone from '../model/milestone.model.js'
 import { isObjectId } from '../utils/http.js'
 import { OWNER_CONSOLE_ONLY } from './ownerConsoleOnly.js'
+import { isLocked } from '../owner/vault.js'
 
 /*
  * Projects and milestones: the website keeps everything without money; anything involving a budget or a payment is
@@ -13,7 +14,9 @@ const positive = (v: unknown) => v !== undefined && v !== null && v !== '' && Nu
 const sent = (v: unknown) => v !== undefined
 const PAYMENT_FIELDS = ['paymentPercentage', 'paymentAmount', 'paymentStatus', 'invoicedAt', 'paidAt', 'paymentMode']
 
-const milestoneHasMoney = (m: any) => !!m && ((m.paymentPercentage ?? 0) > 0 || (m.paymentAmount ?? 0) > 0 || (m.paymentStatus ?? 'unpaid') !== 'unpaid')
+// A locked value (Phase 2) always counts as money: the website cannot read it, so it cannot know it is 0.
+const hasMoney = (v: unknown) => isLocked(v) || (typeof v === 'number' && v > 0) || (typeof v === 'string' && v !== '' && Number(v) !== 0)
+const milestoneHasMoney = (m: any) => !!m && (hasMoney(m.paymentPercentage) || hasMoney(m.paymentAmount) || (m.paymentStatus ?? 'unpaid') !== 'unpaid')
 
 export const projectCreateGuard = (req: Request, res: Response, next: NextFunction) => {
     if (positive(req.body?.budget)) return refuse(res, 'Project budgets')
@@ -23,7 +26,8 @@ export const projectCreateGuard = (req: Request, res: Response, next: NextFuncti
 export const projectUpdateGuard = async (req: Request, res: Response, next: NextFunction) => {
     if (sent(req.body?.budget)) {
         const p = isObjectId(String(req.params.id)) ? await Project.findById(req.params.id).select('budget').lean() : null
-        if (!p || Number(req.body.budget) !== (p.budget ?? 0)) return refuse(res, 'Project budgets')
+        // Only the unchanged plain value may be sent back; a locked budget cannot be sent at all.
+        if (!p || typeof p.budget !== 'number' || Number(req.body.budget) !== p.budget) return refuse(res, 'Project budgets')
     }
     next()
 }
@@ -32,7 +36,7 @@ export const projectDeleteGuard = async (req: Request, res: Response, next: Next
     if (isObjectId(String(req.params.id))) {
         const p = await Project.findById(req.params.id).select('budget').lean()
         const ms = await Milestone.find({ projectId: req.params.id }).select('paymentPercentage paymentAmount paymentStatus').lean()
-        if ((p?.budget ?? 0) > 0 || ms.some(milestoneHasMoney)) return refuse(res, 'Deleting a project with a budget or milestone payments')
+        if (hasMoney(p?.budget) || ms.some(milestoneHasMoney)) return refuse(res, 'Deleting a project with a budget or milestone payments')
     }
     next()
 }

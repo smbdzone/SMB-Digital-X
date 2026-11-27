@@ -4,6 +4,7 @@ import OwnerLog from '../model/ownerLog.model.js'
 import OwnerNonce from '../model/ownerNonce.model.js'
 import { sendSystemMail } from '../email/email.js'
 import { unauthorized } from '../utils/http.js'
+import { assertOwnerLogProtected } from './ownerLogIndex.js'
 import { GENESIS, OwnerLogEntryData, SignedRequest, entryHash, sha256Hex, verifyRequestSignature } from './signing.js'
 
 export const MAX_CLOCK_SKEW_MS = 2 * 60_000
@@ -83,9 +84,15 @@ export const getOwnerKey = () => OwnerKey.findById(OWNER_KEY_ID).lean<IOwnerKey>
 /* History                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Appends one entry to the owner history (hash-chained). Safe when two requests append at the same moment. */
+/**
+ * Appends one entry to the owner history (hash-chained). The unique index on `seq` (checked here, see ownerLogIndex.ts) makes a
+ * concurrent writer that took the same number fail; it then reads the new head and takes the next number.
+ */
+const APPEND_ATTEMPTS = 50
 export const appendOwnerLog = async (input: { action: string; recordId?: string | null; request: SignedRequest; result?: unknown; body?: string | null }): Promise<OwnerLogEntryData> => {
-    for (let attempt = 0; attempt < 10; attempt++) {
+    await assertOwnerLogProtected()
+    for (let attempt = 0; attempt < APPEND_ATTEMPTS; attempt++) {
+        if (attempt > 0) await new Promise(r => setTimeout(r, Math.random() * Math.min(5 * attempt, 50)))   // spread out the retries
         const last = await OwnerLog.findOne().sort({ seq: -1 }).select('seq hash').lean()
         const entry: OwnerLogEntryData = {
             seq: (last?.seq ?? 0) + 1,
@@ -101,7 +108,8 @@ export const appendOwnerLog = async (input: { action: string; recordId?: string 
             await OwnerLog.create({ ...entry, body: input.body ?? null })
             return entry
         } catch (error) {
-            if ((error as { code?: number })?.code === 11000) continue   // someone else took this number: read again
+            // Someone else took this number: read the new head and take the next one.
+            if ((error as { code?: number; keyPattern?: Record<string, unknown> })?.code === 11000 && 'seq' in ((error as any).keyPattern ?? { seq: 1 })) continue
             throw error
         }
     }

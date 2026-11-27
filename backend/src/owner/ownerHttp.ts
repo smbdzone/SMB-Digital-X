@@ -1,5 +1,6 @@
 import { NextFunction, Request, Response } from 'express'
 import { badRequest, unauthorized } from '../utils/http.js'
+import { assertOwnerLogProtected } from './ownerLogIndex.js'
 import { attachmentOf, checkSignedRequest, getOwnerKey, signedBodyOf } from './owner.service.js'
 import { sha256Hex } from './signing.js'
 import { SignedRequest } from './signing.js'
@@ -17,10 +18,33 @@ export const bodyText = (req: Request) => signedBodyOf(req).toString('utf8')
 
 // res.locals.owner = { request, key } after a good signature
 export const requireOwner = async (req: Request, res: Response, next: NextFunction) => {
+    // Before anything else: without the history's unique index no owner action may run (it could fork the chain).
+    await assertOwnerLogProtected()
     const key = await getOwnerKey()
     if (!key) throw unauthorized('The Owner Console is not set up')
     res.locals.owner = { request: await checkSignedRequest(req, key.publicKey), key }
+    if (req.method !== 'GET') await ownerWriteTurn(res)
     next()
+}
+
+/*
+ * State-changing owner requests run one at a time (in this backend process): each writes its records and then appends
+ * its history entry before the next one starts. Otherwise two signed edits of the same record could interleave
+ * (A writes, B writes, B logs, A logs) and the history's latest entry would no longer match what is stored.
+ * Reads stay parallel; their history entries are safe through the unique seq index (appendOwnerLog retries).
+ * The turn ends when the response is finished or the connection closes, whatever happened.
+ */
+let ownerWriteQueue: Promise<void> = Promise.resolve()
+const ownerWriteTurn = (res: Response): Promise<void> => {
+    let release!: () => void
+    const done = new Promise<void>(resolve => { release = resolve })
+    const previous = ownerWriteQueue
+    ownerWriteQueue = previous.then(() => done)
+    let released = false
+    const end = () => { if (!released) { released = true; release() } }
+    res.once('finish', end)
+    res.once('close', end)
+    return previous
 }
 
 export const owner = (res: Response) => res.locals.owner as { request: SignedRequest; key: IOwnerKey }

@@ -20,6 +20,7 @@ import companiesRoutes from './companies.routes.js'
 import projectsRoutes from './projects.routes.js'
 import expensesRoutes from './expenses.routes.js'
 import lettersRoutes from './letters.routes.js'
+import { assertOwnerLogProtected } from './ownerLogIndex.js'
 
 /*
  * Owner Console API (/api/owner). Called only by the Owner Console: one local HTML file on the owner's laptop,
@@ -118,6 +119,7 @@ router.post('/challenge', rateLimit({ windowMs: 15 * 60_000, max: 30, message: '
 
 // Setup step 1: before any key is made, check the window, the owner account and the report email (test email sent).
 router.post('/setup/check', rateLimit({ windowMs: 15 * 60_000, max: 10, message: 'Too many attempts. Try again in a few minutes.' }), async (req, res) => {
+    await assertOwnerLogProtected()
     if (await getOwnerKey()) throw conflict('ALREADY_SET_UP')
     if (!setupWindow().open) throw forbidden('SETUP_WINDOW_CLOSED')
     const b = jsonBody(req)
@@ -143,6 +145,7 @@ router.post('/setup/check', rateLimit({ windowMs: 15 * 60_000, max: 10, message:
 // Setup step 2 (once ever): the locked keys and the public key. Signed with the NEW key, which proves the
 // console holds it. The owner's website email and password bind it to the owner account.
 router.post('/setup', rateLimit({ windowMs: 15 * 60_000, max: 10, message: 'Too many attempts. Try again in a few minutes.' }), async (req, res) => {
+    await assertOwnerLogProtected()
     if (await getOwnerKey()) throw conflict('ALREADY_SET_UP')
     if (!setupWindow().open) throw forbidden('SETUP_WINDOW_CLOSED')
     const b = jsonBody(req)

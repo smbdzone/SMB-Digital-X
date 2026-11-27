@@ -290,19 +290,6 @@ const CertificateIssuedList = () => {
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => openPdf(c)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title="View PDF"><FiEye className="size-4" /></button>
                                                 <button onClick={() => handleDownload(c)} disabled={rowBusy} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50 disabled:opacity-40" title="Download PDF"><FiDownload className="size-4" /></button>
-                                                {!revoked && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => openResend(c)}
-                                                            disabled={rowBusy}
-                                                            className="rounded-lg p-2 text-amber-600 transition hover:bg-amber-50 disabled:opacity-40"
-                                                            title={c.email?.status === 'sent' ? 'Send the email again' : 'Send the email'}
-                                                        >
-                                                            <FiMail className="size-4" />
-                                                        </button>
-                                                        <button onClick={() => openRevoke(c)} disabled={rowBusy} className="rounded-lg p-2 text-red-600 transition hover:bg-red-50 disabled:opacity-40" title="Revoke"><FiSlash className="size-4" /></button>
-                                                    </>
-                                                )}
                                             </div>
                                         </td>
                                     </tr>

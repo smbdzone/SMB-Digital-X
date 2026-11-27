@@ -19,6 +19,7 @@ import peopleRoutes from './people.routes.js'
 import companiesRoutes from './companies.routes.js'
 import projectsRoutes from './projects.routes.js'
 import expensesRoutes from './expenses.routes.js'
+import lettersRoutes from './letters.routes.js'
 
 /*
  * Owner Console API (/api/owner). Called only by the Owner Console: one local HTML file on the owner's laptop,
@@ -239,5 +240,6 @@ router.use(peopleRoutes)
 router.use(companiesRoutes)
 router.use(projectsRoutes)
 router.use(expensesRoutes)
+router.use(lettersRoutes)
 
 export default router

@@ -3,7 +3,7 @@
 import React, { useState } from 'react'
 
 import CertificateIssuedList from '@/components/certificates/CertificateIssuedList'
-import IssueCertificateForm from '@/components/certificates/IssueCertificateForm'
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote'
 import SavedTexts from '@/components/certificates/SavedTexts'
 
 type Tab = 'issued' | 'issue' | 'texts'
@@ -46,7 +46,9 @@ const CertificateManagement = () => {
 
             {/* Each tab loads fresh when opened, so the list is up to date after issuing. */}
             {tab === 'issued' && <CertificateIssuedList />}
-            {tab === 'issue' && <IssueCertificateForm onIssued={() => setTab('issued')} />}
+            {tab === 'issue' && (
+                <OwnerConsoleNote>Previewing, issuing (single and bulk, with the signature), revoking and resending letters are done in the Owner Console. Saved texts stay here.</OwnerConsoleNote>
+            )}
             {tab === 'texts' && <SavedTexts />}
         </>
     )

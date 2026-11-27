@@ -5,6 +5,7 @@ import {
 } from '../controller/certificate.controller.js'
 import { createTemplate, deleteTemplate, listTemplates, updateTemplate } from '../controller/certificateTemplate.controller.js'
 import { isAllow, isVerified } from '../middlewares/isVerified.js'
+import { ownerConsoleOnly } from '../middlewares/ownerConsoleOnly.js'
 
 const router = Router()
 const adminOnly = isAllow(['admin'])
@@ -27,10 +28,12 @@ router.patch('/templates/:id', adminOnly, updateTemplate)
 router.delete('/templates/:id', adminOnly, deleteTemplate)
 
 // Admin: issue
-router.post('/preview', adminOnly, previewCertificate)
-router.post('/preview/pdf', adminOnly, signatureJson, previewCertificatePdf)
-router.post('/bulk', adminOnly, signatureJson, bulkIssueCertificates)
-router.post('/', adminOnly, signatureJson, issueCertificate)
+// Previewing, issuing (single and bulk), revoking and resending letters are done in the Owner Console (signed, with the
+// one-time signature as a signed attachment): refused here for everyone. Saved texts (templates) stay on the website.
+router.post('/preview', ownerConsoleOnly)
+router.post('/preview/pdf', ownerConsoleOnly)
+router.post('/bulk', ownerConsoleOnly)
+router.post('/', ownerConsoleOnly)
 router.get('/', adminOnly, listCertificates)
 
 // Admin, or the owner (checked inside the controller)
@@ -38,7 +41,7 @@ router.get('/:id', getCertificate)
 router.get('/:id/pdf', downloadCertificatePdf)
 
 // Admin
-router.post('/:id/resend-email', adminOnly, signatureJson, resendCertificateEmail)
-router.patch('/:id/revoke', adminOnly, revokeCertificate)
+router.post('/:id/resend-email', ownerConsoleOnly)
+router.patch('/:id/revoke', ownerConsoleOnly)
 
 export default router

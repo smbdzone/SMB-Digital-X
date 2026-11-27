@@ -131,7 +131,7 @@ router.post('/letters/issue', requireOwner, async (req, res) => {
             results.push({ id: p.id, referenceNo: certificate.referenceNo, email: email?.status ?? 'not_sent' })
         }
         const entry = await appendOwnerLog({ action: 'letter.issue', recordId: plan.length === 1 ? plan[0].id : `${plan.length} letters`, request: owner(res).request, body: bodyText(req),
-            result: { ok: true, count: plan.length, signed: !!signature, emails: results.map(r => r.email) } })
+            result: { ok: true, count: plan.length, signed: !!signature, emails: { sent: results.filter(r => r.email === 'sent').length, failed: results.filter(r => r.email === 'failed').length, notSent: results.filter(r => r.email === 'not_sent').length } } })
         await setSealSeq(plan.map(p => p.key), entry.seq)
         res.status(201).json({ success: true, data: { letters: results, log: { seq: entry.seq, head: entry.hash } } })
     } finally {

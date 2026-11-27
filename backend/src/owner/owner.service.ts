@@ -19,24 +19,36 @@ const NONCE_RE = /^[A-Za-z0-9_-]{16,64}$/
 export const rawBodyOf = (req: Request): Buffer => (Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0))
 
 /*
- * Attachments (the one-time signature image, a company logo): sent with the header "X-Owner-Attachment: 1" and the body
- *   { "signed": "<the exact signed JSON text>", "attachment": "<base64>" }
- * Only `signed` is hashed, checked against the signature and kept in the history. It carries the attachment's SHA-256
- * (field attachmentSha256), which the route compares before using the attachment, so the image itself is covered by the
- * owner's signature without ever being stored.
+ * Extra parts next to the signed text, sent with the header "X-Owner-Parts: 1" (or the older "X-Owner-Attachment: 1")
+ * and the body
+ *   { "signed": "<the exact signed JSON text>", "attachment"?: "<base64>", "inner"?: "<text>", "locked"?: ["<locked value>", ...] }
+ * Only `signed` is hashed, checked against the signature and kept in the history. Each other part is covered by a
+ * SHA-256 inside the signed text, which is compared before the part is used:
+ *   attachment  the one-time signature image or a company logo (attachmentSha256 / signatureSha256); never stored
+ *   inner       the plain request body of a Phase 2 request (inner.sha256 of the outer body, see ownerHttp.ts); not stored
+ *   locked      locked history bodies being moved (lockedSha256 of each entry, see vault.routes.ts)
  */
-interface OwnerParts { signed: Buffer; attachment?: Buffer }
+interface OwnerParts { signed: Buffer; attachment?: Buffer; inner?: Buffer; locked?: string[] }
 const partsOf = (req: Request): OwnerParts => {
     const cached = (req as any).ownerParts as OwnerParts | undefined
     if (cached) return cached
     const raw = rawBodyOf(req)
     let parts: OwnerParts = { signed: raw }
-    if (req.get('x-owner-attachment') === '1') {
+    if (req.get('x-owner-attachment') === '1' || req.get('x-owner-parts') === '1') {
         let outer: any
         try { outer = JSON.parse(raw.toString('utf8')) } catch { throw unauthorized('Malformed owner request') }
-        if (typeof outer?.signed !== 'string' || typeof outer?.attachment !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(outer.attachment)) throw unauthorized('Malformed owner request')
-        parts = { signed: Buffer.from(outer.signed, 'utf8'), attachment: Buffer.from(outer.attachment, 'base64') }
-        outer.attachment = ''
+        const bad = typeof outer?.signed !== 'string'
+            || (outer.attachment !== undefined && (typeof outer.attachment !== 'string' || !/^[A-Za-z0-9+/]*={0,2}$/.test(outer.attachment)))
+            || (outer.inner !== undefined && typeof outer.inner !== 'string')
+            || (outer.locked !== undefined && (!Array.isArray(outer.locked) || outer.locked.some((x: unknown) => typeof x !== 'string')))
+        if (bad) throw unauthorized('Malformed owner request')
+        parts = {
+            signed: Buffer.from(outer.signed, 'utf8'),
+            ...(typeof outer.attachment === 'string' ? { attachment: Buffer.from(outer.attachment, 'base64') } : {}),
+            ...(typeof outer.inner === 'string' ? { inner: Buffer.from(outer.inner, 'utf8') } : {}),
+            ...(Array.isArray(outer.locked) ? { locked: outer.locked } : {}),
+        }
+        outer.attachment = ''; outer.inner = ''
     }
     ;(req as any).ownerParts = parts
     return parts
@@ -45,6 +57,10 @@ const partsOf = (req: Request): OwnerParts => {
 export const signedBodyOf = (req: Request): Buffer => partsOf(req).signed
 /** The attachment, if one was sent. The caller checks it against attachmentSha256 in the signed body and wipes it. */
 export const attachmentOf = (req: Request): Buffer | undefined => partsOf(req).attachment
+/** The plain inner body of a Phase 2 request (checked in requireOwner before any route sees it). */
+export const innerOf = (req: Request): Buffer | undefined => partsOf(req).inner
+/** Locked history bodies sent with a "move old history" batch. */
+export const lockedPartsOf = (req: Request): string[] => partsOf(req).locked ?? []
 /** Overwrites the raw request body and the attachment (signature images must not stay in memory longer than needed). */
 export const wipeOwnerRequest = (req: Request) => {
     const parts = (req as any).ownerParts as OwnerParts | undefined

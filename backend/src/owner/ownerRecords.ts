@@ -59,7 +59,7 @@ export const runIntegrityCheck = async (): Promise<IntegrityResult> =>
 export const signedStateOf = async (key: string) => {
     const { latest } = latestSignedStates(await ownerLogEntries())
     const l = latest.get(key)
-    return l && 'state' in l ? l.state : undefined
+    return l && 'state' in l ? l.state : undefined   // undefined also when only its hash is signed (locked body)
 }
 
 /**
@@ -97,7 +97,7 @@ export const signedProfileFilter = async (): Promise<{ ids: Set<string>; reason:
     const ids = new Set<string>()
     for (const r of await currentRecords(['users'])) {
         const l = latest.get(r.key)
-        if (l && 'state' in l && l.state && stateHash(r.key, l.state) === stateHash(r.key, r.state)) ids.add(r.key.split('/')[1])
+        if (l && !l.deleted && l.hash && l.hash === stateHash(r.key, r.state)) ids.add(r.key.split('/')[1])
     }
     return { ids, reason: 'Pay profile changed outside the Owner Console (not signed)' }
 }

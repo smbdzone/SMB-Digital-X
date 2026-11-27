@@ -12,6 +12,7 @@
  */
 import crypto from 'node:crypto'
 import { OwnerLogEntryData, sha256Hex } from './signing.js'
+import { isLocked, isLockedType, stateHasPlainMoney } from './vault.js'
 
 export type RecordType = 'users' | 'salaries' | 'history' | 'companies' | 'projects' | 'milestones' | 'expenses' | 'certificates'
 export const RECORD_TYPES: RecordType[] = ['users', 'salaries', 'history', 'companies', 'projects', 'milestones', 'expenses', 'certificates']
@@ -44,6 +45,8 @@ export const stateHash = (key: string, state: unknown) => sha256Hex(`${STATE_TAG
 const str = (v: unknown): string | null => (typeof v === 'string' ? v.trim() : v === undefined || v === null ? null : String(v).trim())
 const id = (v: unknown): string | null => (v === undefined || v === null || v === '' ? null : String(v))
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null)
+/** A money field that may be locked (Phase 2): the locked text as it is, else the number. */
+const money = (v: unknown): string | number | null => (isLocked(v) ? v : num(v))
 const items = (v: unknown) => (Array.isArray(v) ? v : []).map((i: any) => ({ name: str(i?.name) ?? '', amount: num(i?.amount) ?? 0 }))
 const isoDay = (v: unknown): string | null => {
     if (!v) return null
@@ -112,11 +115,11 @@ export const companyState = (c: any) => ({
 })
 
 /** A project's owner-controlled part is its budget only; everything else stays on the website. */
-export const projectState = (p: any) => ({ budget: num(p.budget) ?? 0 })
+export const projectState = (p: any) => ({ budget: money(p.budget) ?? 0 })
 
 export const milestoneState = (m: any) => ({
-    projectId: id(m.projectId), paymentMode: str(m.paymentMode) || 'percentage', paymentPercentage: num(m.paymentPercentage) ?? 0,
-    paymentAmount: num(m.paymentAmount) ?? 0, currency: str(m.currency) || 'AED', paymentStatus: str(m.paymentStatus) || 'unpaid',
+    projectId: id(m.projectId), paymentMode: str(m.paymentMode) || 'percentage', paymentPercentage: money(m.paymentPercentage) ?? 0,
+    paymentAmount: money(m.paymentAmount) ?? 0, currency: str(m.currency) || 'AED', paymentStatus: str(m.paymentStatus) || 'unpaid',
     invoicedAt: isoDay(m.invoicedAt), paidAt: isoDay(m.paidAt),
 })
 
@@ -185,25 +188,109 @@ export interface IntegrityResult {
     flags: IntegrityFlag[]
 }
 
-interface SignedChange { seq: number; action: string; state?: any; hash?: string; signature?: boolean }
+/*
+ * The history index (Phase 2). Once locking has started, the console signs a short outer body
+ *   { v: 2, action, index, inner: { sha256, locked } }
+ * whose `inner.locked` is the real request body, locked with the vault key. `index` lists, for each record the action
+ * changed: its key, the hash of its new state (not for a plain amount of a locked type: a hash of a small state can be
+ * guessed), and whether it was deleted, has no money yet, or is a pending expense. The server checks the index against
+ * the plain inner body when the request arrives (ownerHttp.ts), so the server's own records check and the daily report
+ * keep working from signed data without reading any body. Same function as owner-console/src/integrity.js.
+ */
+export interface IndexChange { key: string; hash?: string; deleted?: true; free?: true; pending?: true }
+export interface HistoryIndex { action: string; types?: RecordType[]; signature?: true; changes: IndexChange[] }
 
-/** The latest signed state per record, from the history (only entries whose stored body matches the signed hash). */
+export const historyIndex = (body: any): HistoryIndex => {
+    const changes: IndexChange[] = []
+    for (const c of Array.isArray(body?.changes) ? body.changes : []) {
+        const p = typeof c?.key === 'string' ? parseKey(c.key) : null
+        if (!p) continue
+        const out: IndexChange = { key: c.key }
+        if (!('state' in c)) { if (typeof c.hash === 'string') out.hash = c.hash }
+        else if (c.state === null) out.deleted = true
+        else {
+            if (!(isLockedType(p.type) && stateHasPlainMoney(p.type, c.state))) out.hash = stateHash(c.key, c.state)
+            if (freeOfMoney(p.type, c.state)) out.free = true
+            if (p.type === 'expenses' && c.state?.status === 'pending') out.pending = true
+        }
+        changes.push(out)
+    }
+    return {
+        action: String(body?.action ?? ''),
+        ...(body?.action === 'adopt' && Array.isArray(body.types) ? { types: body.types.filter((t: any) => RECORD_TYPES.includes(t)) } : {}),
+        ...(typeof body?.signatureSha256 === 'string' ? { signature: true as const } : {}),
+        changes,
+    }
+}
+
+export interface OuterBody { v: 2; action: string; index: HistoryIndex; inner: { sha256: string; locked: string } }
+/** The signed outer body of a Phase 2 request, or null. */
+export const outerBodyOf = (text: string): OuterBody | null => {
+    let o: any
+    try { o = JSON.parse(text) } catch { return null }
+    return o && o.v === 2 && o.index && Array.isArray(o.index.changes) && typeof o.inner?.locked === 'string' ? o : null
+}
+
+interface SignedChange {
+    seq: number; action: string; signature?: boolean
+    hash?: string; deleted?: boolean; free?: boolean; pending?: boolean
+    state?: any       // only when the body is plain (before locking); otherwise only the console has it
+}
+
+/**
+ * The latest signed state per record, from the history. Three kinds of body:
+ *   - plain (before locking): its hash must match the signed hash; the states are read from it
+ *   - Phase 2 outer body: its hash must match; its signed index is used
+ *   - a moved old body (now a locked value): its index comes from the signed "vault.history" batch that moved it
+ */
 export const latestSignedStates = (entries: OwnerLogEntryData[]) => {
     const latest = new Map<string, SignedChange>()
     const adopted = new Set<RecordType>()
-    for (const e of [...entries].sort((a, b) => a.seq - b.seq)) {
-        if (!e.body || sha256Hex(e.body) !== e.request.bodyHash) continue
+    const sorted = [...entries].sort((a, b) => a.seq - b.seq)
+
+    const moved = new Map<number, { lockedSha256: string; index: HistoryIndex }[]>()
+    for (const e of sorted) {
+        if (e.action !== 'vault.history' || !e.body || sha256Hex(e.body) !== e.request.bodyHash) continue
+        let body: any
+        try { body = JSON.parse(e.body) } catch { continue }
+        if (body?.action !== 'vault.history' || !Array.isArray(body.entries)) continue
+        for (const m of body.entries) if (m && typeof m.seq === 'number' && m.index) moved.set(m.seq, [...(moved.get(m.seq) ?? []), m])
+    }
+
+    for (const e of sorted) {
+        if (!e.body) continue
         let result: any = null
         try { result = e.result ? JSON.parse(e.result) : null } catch { /* */ }
         if (result && result.ok === false) continue
-        let body: any
-        try { body = JSON.parse(e.body) } catch { continue }
-        if (body?.action === 'adopt' && Array.isArray(body.types)) for (const t of body.types) if (RECORD_TYPES.includes(t)) adopted.add(t)
-        if (!Array.isArray(body?.changes)) continue
-        for (const c of body.changes) {
+        let index: HistoryIndex | null = null
+        let plain: any = null
+        if (isLocked(e.body)) {
+            const bodySha = sha256Hex(e.body)
+            index = moved.get(e.seq)?.find(m => m.lockedSha256 === bodySha)?.index ?? null
+        } else {
+            if (sha256Hex(e.body) !== e.request.bodyHash) continue
+            const outer = outerBodyOf(e.body)
+            if (outer) index = outer.index
+            else {
+                try { plain = JSON.parse(e.body) } catch { continue }
+                try { index = historyIndex(plain) } catch { continue }
+            }
+        }
+        if (!index || !Array.isArray(index.changes)) continue
+        if (index.action === 'adopt' && Array.isArray(index.types)) for (const t of index.types) if (RECORD_TYPES.includes(t)) adopted.add(t)
+        const plainStates = new Map<string, any>()
+        if (plain && Array.isArray(plain.changes)) for (const c of plain.changes) if (typeof c?.key === 'string' && 'state' in c) plainStates.set(c.key, c.state)
+        for (const c of index.changes) {
             if (typeof c?.key !== 'string' || !parseKey(c.key)) continue
             // "signature" stays true once any signed entry for the record carried a signature hash (a later revoke keeps it signed).
-            latest.set(c.key, { seq: e.seq, action: String(body.action), signature: typeof body.signatureSha256 === 'string' || latest.get(c.key)?.signature === true, ...('state' in c ? { state: c.state } : {}), ...(c.hash ? { hash: c.hash } : {}) })
+            latest.set(c.key, {
+                seq: e.seq, action: String(index.action), signature: index.signature === true || latest.get(c.key)?.signature === true,
+                deleted: c.deleted === true, free: c.free === true, pending: c.pending === true,
+                // A plain body gives the state itself (and its hash, even where the index leaves the hash out).
+                ...(plainStates.has(c.key)
+                    ? { state: plainStates.get(c.key), ...(plainStates.get(c.key) !== null ? { hash: stateHash(c.key, plainStates.get(c.key)) } : {}) }
+                    : typeof c.hash === 'string' ? { hash: c.hash } : {}),
+            })
         }
     }
     return { latest, adopted }
@@ -222,7 +309,15 @@ export const checkIntegrity = (entries: OwnerLogEntryData[], records: CurrentRec
     const flags: IntegrityFlag[] = []
     const notAdopted: Record<string, number> = {}
     const present = new Set<string>()
-    const signedOf = (key: string) => { const l = latest.get(key); return l && 'state' in l ? l.state : undefined }
+    const now = new Map(records.map(r => [r.key, r]))
+    // The signed state of a record: from a plain body, or (when only its hash is signed) the record itself if it matches.
+    const signedOf = (key: string) => {
+        const l = latest.get(key)
+        if (!l || l.deleted) return undefined
+        if ('state' in l) return l.state
+        const r = now.get(key)
+        return r && l.hash && l.hash === stateHash(key, r.state) ? r.state : undefined
+    }
 
     for (const r of records) {
         const type = parseKey(r.key)!.type
@@ -237,20 +332,20 @@ export const checkIntegrity = (entries: OwnerLogEntryData[], records: CurrentRec
                 : 'no signed entry: created or changed outside the Owner Console' })
             continue
         }
-        if ('state' in l && l.state === null) { flags.push({ key: r.key, label: r.label, problem: `deleted by signed entry #${l.seq} but still present` }); continue }
+        if (l.deleted) { flags.push({ key: r.key, label: r.label, problem: `deleted by signed entry #${l.seq} but still present` }); continue }
         // An expense the owner left (or put back) as pending may still be edited by the employee who added it.
-        if (type === 'expenses' && 'state' in l && l.state?.status === 'pending' && freeOfMoney(type, r.state)) continue
+        if (type === 'expenses' && l.pending && freeOfMoney(type, r.state)) continue
         // A letter may show "Digitally signed" only if a signed entry for it carried a signature hash.
         if (type === 'certificates' && r.signed && !l.signature) flags.push({ key: r.key, label: r.label, problem: 'marked as signed, but no signed entry for it carried a signature' })
-        const expected = 'state' in l ? stateHash(r.key, l.state) : l.hash
-        if (expected !== stateHash(r.key, r.state)) {
+        if (!l.hash) { flags.push({ key: r.key, label: r.label, problem: `its last signed state (entry #${l.seq}) is locked: run Verify everything in the Owner Console` }); continue }
+        if (l.hash !== stateHash(r.key, r.state)) {
             flags.push({ key: r.key, label: r.label, problem: `differs from signed entry #${l.seq}`, ...('state' in l ? { fields: diffStates(l.state, r.state) } : {}) })
         }
     }
     for (const [key, l] of latest) {
         const t = parseKey(key)!.type
         if (!types.includes(t) || present.has(key)) continue
-        if ('state' in l && (l.state === null || freeOfMoney(t, l.state))) continue
+        if (l.deleted || l.free) continue
         flags.push({ key, label: key, problem: `signed in entry #${l.seq} but missing from the database` })
     }
     return { ok: flags.length === 0, checked: records.length, adoptedTypes: [...adopted], notAdopted, flags }

@@ -18,6 +18,7 @@ places at the same moment, never doubles anything.
 |---|---|---|
 | Monthly payroll | `POST /api/cron/payroll` | Creates the salary records of the current month **in `PAYROLL_TIMEZONE` (Asia/Dubai)**, whatever the server's own timezone. Existing records are never touched, so it can run as often as you like. |
 | Media cleanup | `POST /api/cron/media-cleanup` | Deletes chat attachments older than 48 hours from Cloudinary. |
+| Owner daily report | `POST /api/cron/owner-report` | Emails `OWNER_REPORT_EMAIL` the Owner Console report for yesterday (Asia/Dubai): owner actions, history check, chain and key fingerprints. Sent once per day, by whichever run comes first. |
 | Chat reminders | `POST /api/cron/chat-reminders` | Emails people about unread chat messages. Catches up on everything that became due since its previous run (at most `CHAT_REMINDER_CATCHUP_MAX_DAYS`, default 7), so any interval works. |
 
 Every call needs the header `X-Cron-Secret` with the value of `CRON_SECRET` (compared in constant time).
@@ -48,6 +49,7 @@ characters, the endpoints refuse everything.
    */5 * * * *   curl -fsS -m 120 -X POST -H @/home/CPANELUSER/.cron-secret https://api.smbdigitalx.com/api/cron/chat-reminders >/dev/null
    7 * * * *     curl -fsS -m 300 -X POST -H @/home/CPANELUSER/.cron-secret https://api.smbdigitalx.com/api/cron/media-cleanup >/dev/null
    15 * * * *    curl -fsS -m 300 -X POST -H @/home/CPANELUSER/.cron-secret https://api.smbdigitalx.com/api/cron/payroll >/dev/null
+   25 * * * *    curl -fsS -m 120 -X POST -H @/home/CPANELUSER/.cron-secret https://api.smbdigitalx.com/api/cron/owner-report >/dev/null
    ```
 
    - The request itself wakes a paused app, so the job runs even after the app was asleep.
@@ -56,6 +58,7 @@ characters, the endpoints refuse everything.
    - If cPanel does not allow every five minutes, use any longer interval (every 15 minutes, every hour):
      chat reminders catch up on everything since the previous run. Reminder emails then arrive up to
      that interval later than `CHAT_REMINDER_DELAY_MINUTES`.
+   - The owner report runs every hour but sends only once per day: the first run after midnight in Dubai.
    - Payroll runs every hour, but only creates anything once per month (on the 1st, Asia/Dubai time, or
      on the first run after that if the app was paused).
 
@@ -68,3 +71,25 @@ characters, the endpoints refuse everything.
 
 `GET` and any other job name are not accepted. The last run of each job (time, source, result or error) is
 in the `jobruns` collection.
+
+## Owner Console
+
+The Owner Console is a single HTML file on Sir Simo's laptop (`owner-console/`, see its README). It talks only to
+`/api/owner/*`. Two settings in the backend environment:
+
+| Variable | What it is |
+|---|---|
+| `OWNER_REPORT_EMAIL` | Sir Simo's private email. Receives the setup confirmation, passphrase-change notices and the daily report. |
+| `OWNER_SETUP_WINDOW_UNTIL` | An ISO time, e.g. `2026-12-01T10:30:00Z`. The one-time setup is possible only before it. Leave it unset at all other times. |
+
+**One-time setup, only with Sir Simo present:**
+
+1. With Sir Simo at his laptop, set `OWNER_SETUP_WINDOW_UNTIL` to about 30 minutes from now (UTC) and restart the app.
+2. He opens the console file and follows the setup. Its first step sends a test email to `OWNER_REPORT_EMAIL`:
+   check it arrived (and not in spam) before going on.
+3. When setup is done, he compares the key fingerprint in the console, on the printed recovery sheet and in the
+   "Owner Console setup completed" email. They must all be the same.
+4. Remove `OWNER_SETUP_WINDOW_UNTIL` and restart the app. (Setup is refused for ever after one success anyway.)
+
+If the console says it is **already set up** on his first visit, nobody may continue: someone else completed
+the setup. Treat it as an incident.

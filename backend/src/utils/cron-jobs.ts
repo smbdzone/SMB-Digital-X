@@ -27,5 +27,8 @@ mongoose.connection.once('open', () => {
 // Every hour: chat attachments older than 48 hours.
 export const cleanupMedia = cron.schedule('0 * * * *', fire('media-cleanup'));
 
+// Every day at 00:30 Dubai: the owner's daily report (sent once per day, whichever run comes first).
+export const ownerDailyReport = cron.schedule('30 0 * * *', fire('owner-report'), { timezone: 'Asia/Dubai' });
+
 // Every minute: reminder emails for unread chat messages.
 export const unreadChatReminders = cron.schedule('* * * * *', fire('chat-reminders'));

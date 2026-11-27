@@ -1,0 +1,50 @@
+# Phrases the Owner Console refuses as a passphrase (compared ignoring case, spaces and punctuation).
+# Famous examples, song/film/book lines, keyboard patterns and company-related phrases.
+correct horse battery staple
+the quick brown fox jumps over the lazy dog
+to be or not to be that is the question
+all work and no play makes jack a dull boy
+may the force be with you
+i love you more than anything
+in god we trust
+let it be let it be
+hello world hello world
+password password password
+this is my password
+my password is secure
+i am the owner of this company
+smb digital zone owner
+smb digitalx owner console
+axis aura properties
+smb axis proptech
+welcome to dubai
+dubai marina tower
+open sesame open sesame
+qwertyuiopasdfghjkl
+qwerty qwerty qwerty
+asdfghjkl asdfghjkl
+1234567890 1234567890
+abcdefghijklmnopqrstuvwxyz
+one two three four five
+the answer is forty two
+a journey of a thousand miles begins with a single step
+the early bird catches the worm
+actions speak louder than words
+knowledge is power
+time is money
+never give up never surrender
+keep calm and carry on
+just do it just do it
+winter is coming
+i think therefore i am
+live laugh love
+carpe diem seize the day
+there is no place like home
+houston we have a problem
+you shall not pass
+we will we will rock you
+somewhere over the rainbow
+bismillah ir rahman ir rahim
+alhamdulillah alhamdulillah
+inshallah inshallah inshallah
+mashallah tabarakallah

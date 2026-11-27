@@ -140,6 +140,9 @@ test('letters: "signed" must come from a signed entry that carried a signature',
     assert.equal((await I.checkIntegrity([adopt, plain, withSig], [{ ...rec, signed: true }])).ok, true)
     r = await I.checkIntegrity([adopt, plain, withSig], [{ ...rec, signed: true, state: { ...letter, body: 'Other' } }])
     assert.deepEqual(r.flags[0].fields, [{ field: 'body', signed: 'Text', now: 'Other' }])
+    // revoked later (no signature on that entry): still a signed letter
+    const revoked = await entry({ action: 'letter.revoke', changes: [{ key: `certificates/${lid}`, state: { ...letter, status: 'revoked', revokeReason: 'x' } }] })
+    assert.equal((await I.checkIntegrity([adopt, plain, withSig, revoked], [{ ...rec, signed: true, state: { ...letter, status: 'revoked', revokeReason: 'x' } }])).ok, true)
 })
 
 test('companies and milestone payments: field-level differences; a deleted project with a budget is "missing"', async () => {

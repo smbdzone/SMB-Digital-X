@@ -202,7 +202,8 @@ export const latestSignedStates = (entries: OwnerLogEntryData[]) => {
         if (!Array.isArray(body?.changes)) continue
         for (const c of body.changes) {
             if (typeof c?.key !== 'string' || !parseKey(c.key)) continue
-            latest.set(c.key, { seq: e.seq, action: String(body.action), signature: typeof body.signatureSha256 === 'string', ...('state' in c ? { state: c.state } : {}), ...(c.hash ? { hash: c.hash } : {}) })
+            // "signature" stays true once any signed entry for the record carried a signature hash (a later revoke keeps it signed).
+            latest.set(c.key, { seq: e.seq, action: String(body.action), signature: typeof body.signatureSha256 === 'string' || latest.get(c.key)?.signature === true, ...('state' in c ? { state: c.state } : {}), ...(c.hash ? { hash: c.hash } : {}) })
         }
     }
     return { latest, adopted }
@@ -239,8 +240,8 @@ export const checkIntegrity = (entries: OwnerLogEntryData[], records: CurrentRec
         if ('state' in l && l.state === null) { flags.push({ key: r.key, label: r.label, problem: `deleted by signed entry #${l.seq} but still present` }); continue }
         // An expense the owner left (or put back) as pending may still be edited by the employee who added it.
         if (type === 'expenses' && 'state' in l && l.state?.status === 'pending' && freeOfMoney(type, r.state)) continue
-        // A letter may show "Digitally signed" only if its latest signed entry carried a signature hash.
-        if (type === 'certificates' && r.signed && !l.signature) flags.push({ key: r.key, label: r.label, problem: `marked as signed, but signed entry #${l.seq} carried no signature` })
+        // A letter may show "Digitally signed" only if a signed entry for it carried a signature hash.
+        if (type === 'certificates' && r.signed && !l.signature) flags.push({ key: r.key, label: r.label, problem: 'marked as signed, but no signed entry for it carried a signature' })
         const expected = 'state' in l ? stateHash(r.key, l.state) : l.hash
         if (expected !== stateHash(r.key, r.state)) {
             flags.push({ key: r.key, label: r.label, problem: `differs from signed entry #${l.seq}`, ...('state' in l ? { fields: diffStates(l.state, r.state) } : {}) })

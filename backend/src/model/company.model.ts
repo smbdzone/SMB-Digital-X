@@ -25,6 +25,7 @@ export interface ICompany extends Document {
         signature?: string  // typed signature text, used on SALARY SLIPS only (letters use the signature image flow)
     }
     isActive: boolean
+    ownerSeal?: { seq?: number | null; hash?: string }   // Owner Console seal (see owner/ownerState.ts)
     createdAt: Date
     updatedAt: Date
 }
@@ -60,6 +61,7 @@ const companySchema = new Schema<ICompany>(
             signature: { type: String, trim: true },
         },
         isActive: { type: Boolean, default: true },
+        ownerSeal: { type: Schema.Types.Mixed, default: undefined },   // { seq, hash }: only set by a signed Owner Console action
     },
     { timestamps: true }
 )

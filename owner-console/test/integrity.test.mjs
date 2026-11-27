@@ -85,3 +85,73 @@ test('new record ids look like MongoDB ObjectIds and differ', () => {
     const a = I.newRecordId(), b = I.newRecordId()
     assert.match(a, /^[0-9a-f]{24}$/); assert.notEqual(a, b)
 })
+
+/* ---------------- Phase 1b-ii record types ---------------- */
+const pid = 'dddddddddddddddddddddddd', mid = 'eeeeeeeeeeeeeeeeeeeeeeee', xid = 'ffffffffffffffffffffffff', lid = '0123456789abcdef01234567'
+const allTypes = ['users', 'salaries', 'history', 'companies', 'projects', 'milestones', 'expenses', 'certificates']
+
+test('expense taxes in cents, like the website', () => {
+    assert.deepEqual(I.computeTaxes(3900, [{ name: 'VAT', percentage: 5 }]), { taxes: [{ name: 'VAT', percentage: 5, amount: 195 }], totalTax: 195, totalAmount: 4095 })
+    assert.deepEqual(I.computeTaxes(0.1, [{ name: 'A', percentage: 10 }, { name: 'B', percentage: 20 }]).totalAmount, 0.13)
+    assert.deepEqual(I.computeTaxes(100), { taxes: [], totalTax: 0, totalAmount: 100 })
+})
+
+test('no money yet: a budget-0 project, an unpaid 0% milestone and a pending expense need no signed entry', async () => {
+    seq = 0
+    const adopt = await entry({ action: 'adopt', types: allTypes, changes: [] })
+    const free = [
+        { key: `projects/${pid}`, label: 'P', state: I.normalizeProject({ budget: 0 }) },
+        { key: `milestones/${mid}`, label: 'M', state: I.normalizeMilestone({ projectId: pid }) },
+        { key: `expenses/${xid}`, label: 'X', state: I.normalizeExpense({ amount: 10, totalAmount: 10, currency: 'AED', status: 'pending' }) },
+    ]
+    assert.equal((await I.checkIntegrity([adopt], free)).ok, true)
+    const money = [
+        { ...free[0], state: { budget: 5 } },
+        { ...free[1], state: { ...free[1].state, paymentStatus: 'paid' } },
+        { ...free[2], state: { ...free[2].state, status: 'approved' } },
+    ]
+    const r = await I.checkIntegrity([adopt], money)
+    assert.equal(r.flags.length, 3); r.flags.forEach(f => assert.match(f.problem, /no signed entry/))
+})
+
+test('expenses: signed pending, edited by the employee while pending -> fine; approved outside -> flagged', async () => {
+    seq = 0
+    const pending = I.normalizeExpense({ amount: 10, totalAmount: 10, currency: 'AED', status: 'pending' })
+    const signed = await entry({ action: 'adopt', types: allTypes, changes: [{ key: `expenses/${xid}`, state: pending }] })
+    const edited = { key: `expenses/${xid}`, label: 'X', state: { ...pending, amount: 12, totalAmount: 12 } }
+    assert.equal((await I.checkIntegrity([signed], [edited])).ok, true)
+    const r = await I.checkIntegrity([signed], [{ ...edited, state: { ...pending, status: 'approved' } }])
+    assert.deepEqual(r.flags[0].fields, [{ field: 'status', signed: 'pending', now: 'approved' }])
+    // a signed pending expense that disappears is fine (the employee may delete it while pending)
+    assert.equal((await I.checkIntegrity([signed], [])).ok, true)
+})
+
+test('letters: "signed" must come from a signed entry that carried a signature', async () => {
+    seq = 0
+    const letter = I.normalizeCertificate({ employeeId: uid, companyId: 'cccccccccccccccccccccccc', companyName: 'Co', kind: 'letter', typeKey: 'experience_letter', title: 'Experience Letter', body: 'Text', issueDate: '2026-11-27', recipient: { name: 'Ann' }, status: 'issued' })
+    assert.equal(letter.subject, ''); assert.equal(letter.issueDate, '2026-11-27T00:00:00.000Z')
+    const plain = await entry({ action: 'letter.issue', changes: [{ key: `certificates/${lid}`, state: letter }] })
+    const adopt = await entry({ action: 'adopt', types: allTypes, changes: [] })
+    const rec = { key: `certificates/${lid}`, label: 'L', state: letter }
+    assert.equal((await I.checkIntegrity([adopt, plain], [rec])).ok, true)
+    let r = await I.checkIntegrity([adopt, plain], [{ ...rec, signed: true }])
+    assert.match(r.flags[0].problem, /marked as signed/)
+    const withSig = await entry({ action: 'letter.resend', signatureSha256: 'ab'.repeat(32), changes: [{ key: `certificates/${lid}`, state: letter }] })
+    assert.equal((await I.checkIntegrity([adopt, plain, withSig], [{ ...rec, signed: true }])).ok, true)
+    r = await I.checkIntegrity([adopt, plain, withSig], [{ ...rec, signed: true, state: { ...letter, body: 'Other' } }])
+    assert.deepEqual(r.flags[0].fields, [{ field: 'body', signed: 'Text', now: 'Other' }])
+    // revoked later (no signature on that entry): still a signed letter
+    const revoked = await entry({ action: 'letter.revoke', changes: [{ key: `certificates/${lid}`, state: { ...letter, status: 'revoked', revokeReason: 'x' } }] })
+    assert.equal((await I.checkIntegrity([adopt, plain, withSig, revoked], [{ ...rec, signed: true, state: { ...letter, status: 'revoked', revokeReason: 'x' } }])).ok, true)
+})
+
+test('companies and milestone payments: field-level differences; a deleted project with a budget is "missing"', async () => {
+    seq = 0
+    const co = I.normalizeCompany({ name: 'Co', code: 'co', currency: 'AED', brandColor: '#000000', signatory: { name: 'S' } })
+    const ms = I.normalizeMilestone({ projectId: pid, paymentPercentage: 30, paymentAmount: 300, paymentStatus: 'invoiced', invoicedAt: '2026-11-01' })
+    const adopt = await entry({ action: 'adopt', types: allTypes, changes: [
+        { key: `companies/${uid}`, state: co }, { key: `milestones/${mid}`, state: ms }, { key: `projects/${pid}`, state: { budget: 1000 } }] })
+    const now = [{ key: `companies/${uid}`, label: 'C', state: { ...co, signatory: { ...co.signatory, name: 'Fake' } } }, { key: `milestones/${mid}`, label: 'M', state: { ...ms, paymentStatus: 'paid' } }]
+    const r = await I.checkIntegrity([adopt], now)
+    assert.deepEqual(r.flags.map(f => f.fields?.[0]?.field ?? f.problem), ['signatory.name', 'paymentStatus', `signed in entry #1 but missing from the database`])
+})

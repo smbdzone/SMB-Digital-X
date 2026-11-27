@@ -72,7 +72,7 @@ const takeSignature = (req: Request): Buffer | undefined => {
 const SIGNED_NEEDS_EMAIL = 'A signed document has to be emailed: the email is the only copy that carries the signature. '
     + 'Turn on "Send email" or remove the signature.'
 
-const parseIssueInput = (b: any): IssueInput => {
+export const parseIssueInput = (b: any): IssueInput => {
     const templateId = b.templateId ? String(b.templateId) : undefined
     if (templateId && !isObjectId(templateId)) throw badRequest('templateId is not a valid id')
     if (b.companyId && !isObjectId(String(b.companyId))) throw badRequest('companyId is not a valid id')

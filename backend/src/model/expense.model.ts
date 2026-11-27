@@ -67,6 +67,7 @@ export interface IExpense extends Document {
     deletedBy?: Types.ObjectId
     updatedBy?: Types.ObjectId
 
+    ownerSeal?: { seq?: number | null; hash?: string }   // Owner Console seal (see owner/ownerState.ts)
     createdAt: Date
     updatedAt: Date
 }
@@ -119,6 +120,7 @@ const expenseSchema = new Schema<IExpense>(
         deletedAt: { type: Date },
         deletedBy: { type: Schema.Types.ObjectId, ref: 'users' },
         updatedBy: { type: Schema.Types.ObjectId, ref: 'users' },
+        ownerSeal: { type: Schema.Types.Mixed, default: undefined },   // { seq, hash }: only set by a signed Owner Console action
     },
     { timestamps: true }
 )

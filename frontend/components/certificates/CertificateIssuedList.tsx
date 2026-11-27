@@ -1,15 +1,13 @@
 'use client'
 
 import React, { useCallback, useEffect, useState } from 'react'
-import { FiDownload, FiEye, FiMail, FiSearch, FiSlash } from 'react-icons/fi'
+import { FiDownload, FiEye, FiSearch } from 'react-icons/fi'
 
-import ModalBox from '@/components/ui/ModalBox'
 import Pagination from '@/components/ui/Pagination'
 import SelectField from '@/components/ui/SelectField'
 import { StatusBadge } from '@/components/ui/shared'
 import { CertificateStatusBadge, KindBadge } from './Badges'
 import PdfViewerModal, { type PdfTarget } from './PdfViewerModal'
-import SignaturePicker, { type PickedSignature } from './SignaturePicker'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { useCompanies } from '@/hooks/useCompanies'
@@ -20,8 +18,6 @@ import {
     ICertificate,
     getCertificatePdf,
     getCertificates,
-    resendCertificateEmail,
-    revokeCertificate,
     saveBlob,
 } from '@/services/certificate.services'
 import { errorMessage, formatDate } from '@/lib/utils'
@@ -50,11 +46,6 @@ const CertificateIssuedList = () => {
     const [busyId, setBusyId] = useState<string | null>(null)
 
     const [pdfTarget, setPdfTarget] = useState<PdfTarget | null>(null)
-    const [revokeTarget, setRevokeTarget] = useState<ICertificate | null>(null)
-    // Resend dialog. The signature is optional and lives only in this state until the dialog closes.
-    const [resendTarget, setResendTarget] = useState<ICertificate | null>(null)
-    const [resendSignature, setResendSignature] = useState<PickedSignature | null>(null)
-    const [revokeReason, setRevokeReason] = useState('')
 
     // Wait until the person stops typing before asking the server.
     useEffect(() => {
@@ -105,53 +96,6 @@ const CertificateIssuedList = () => {
             saveBlob(blob, `${c.referenceNo}.pdf`)
         } catch (error) {
             toast.showError(errorMessage(error, 'Could not download the PDF'))
-        } finally {
-            setBusyId(null)
-        }
-    }
-
-    const openResend = (c: ICertificate) => {
-        setResendSignature(null)
-        setResendTarget(c)
-    }
-
-    const closeResend = () => {
-        setResendTarget(null)
-        setResendSignature(null)   // cancel = the signature is gone
-    }
-
-    const handleResend = async () => {
-        const c = resendTarget
-        if (!token || !c) return
-        setBusyId(c._id)
-        try {
-            const res = await resendCertificateEmail(token, c._id, resendSignature?.base64)
-            toast.showSuccess(res.message || 'Email sent')
-            closeResend()
-            await load()
-        } catch (error) {
-            toast.showError(errorMessage(error, 'The email could not be sent'))
-            await load()
-        } finally {
-            setBusyId(null)
-        }
-    }
-
-    const openRevoke = (c: ICertificate) => {
-        setRevokeTarget(c)
-        setRevokeReason('')
-    }
-
-    const handleRevoke = async () => {
-        if (!token || !revokeTarget) return
-        setBusyId(revokeTarget._id)
-        try {
-            const res = await revokeCertificate(token, revokeTarget._id, revokeReason)
-            toast.showSuccess(res.message || 'Certificate revoked')
-            setRevokeTarget(null)
-            await load()
-        } catch (error) {
-            toast.showError(errorMessage(error, 'Could not revoke the certificate'))
         } finally {
             setBusyId(null)
         }
@@ -290,19 +234,6 @@ const CertificateIssuedList = () => {
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => openPdf(c)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title="View PDF"><FiEye className="size-4" /></button>
                                                 <button onClick={() => handleDownload(c)} disabled={rowBusy} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50 disabled:opacity-40" title="Download PDF"><FiDownload className="size-4" /></button>
-                                                {!revoked && (
-                                                    <>
-                                                        <button
-                                                            onClick={() => openResend(c)}
-                                                            disabled={rowBusy}
-                                                            className="rounded-lg p-2 text-amber-600 transition hover:bg-amber-50 disabled:opacity-40"
-                                                            title={c.email?.status === 'sent' ? 'Send the email again' : 'Send the email'}
-                                                        >
-                                                            <FiMail className="size-4" />
-                                                        </button>
-                                                        <button onClick={() => openRevoke(c)} disabled={rowBusy} className="rounded-lg p-2 text-red-600 transition hover:bg-red-50 disabled:opacity-40" title="Revoke"><FiSlash className="size-4" /></button>
-                                                    </>
-                                                )}
                                             </div>
                                         </td>
                                     </tr>
@@ -316,79 +247,6 @@ const CertificateIssuedList = () => {
 
             <PdfViewerModal target={pdfTarget} onClose={() => setPdfTarget(null)} />
 
-            {/* Resend */}
-            <ModalBox
-                open={!!resendTarget}
-                onClose={closeResend}
-                size="md"
-                title="Send the email again?"
-                description={resendTarget ? `${resendTarget.referenceNo} to ${resendTarget.recipient?.name}.` : undefined}
-                footer={
-                    <>
-                        <button
-                            type="button"
-                            onClick={closeResend}
-                            className="inline-flex h-11 items-center rounded-xl border border-charcoal/10 bg-white px-4 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03]"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleResend}
-                            disabled={!!busyId}
-                            className="inline-flex h-11 items-center gap-2 rounded-xl bg-amber-600 px-4 text-sm font-semibold text-white transition hover:bg-amber-700 disabled:opacity-60"
-                        >
-                            <FiMail className="size-4" /> {busyId ? 'Sending...' : resendSignature ? 'Send signed copy' : 'Send'}
-                        </button>
-                    </>
-                }
-            >
-                <p className="mb-3 text-sm text-charcoal/70">
-                    {resendTarget?.signedAt
-                        ? 'Without a signature, the copy shows "Digitally signed by ..." and no signature image.'
-                        : 'Without a signature, the copy is sent unsigned.'}
-                    {' '}Add the signature to send a signed copy. It is used for this email only and never saved.
-                </p>
-                <SignaturePicker value={resendSignature} onChange={setResendSignature} disabled={!!busyId} />
-            </ModalBox>
-
-            {/* Revoke */}
-            <ModalBox
-                open={!!revokeTarget}
-                onClose={() => setRevokeTarget(null)}
-                size="md"
-                title="Revoke this document?"
-                description={revokeTarget ? `${revokeTarget.referenceNo} for ${revokeTarget.recipient?.name}. The employee will no longer see it, and it cannot be emailed again.` : undefined}
-                footer={
-                    <>
-                        <button
-                            type="button"
-                            onClick={() => setRevokeTarget(null)}
-                            className="inline-flex h-11 items-center rounded-xl border border-charcoal/10 bg-white px-4 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03]"
-                        >
-                            Cancel
-                        </button>
-                        <button
-                            type="button"
-                            onClick={handleRevoke}
-                            disabled={!!busyId}
-                            className="inline-flex h-11 items-center rounded-xl bg-red-600 px-4 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-60"
-                        >
-                            {busyId ? 'Revoking...' : 'Revoke'}
-                        </button>
-                    </>
-                }
-            >
-                <label className="mb-2 block text-sm font-medium text-charcoal">Reason (optional)</label>
-                <textarea
-                    value={revokeReason}
-                    onChange={e => setRevokeReason(e.target.value)}
-                    rows={3}
-                    maxLength={500}
-                    placeholder="Issued by mistake, wrong dates, ..."
-                    className="w-full rounded-xl border border-charcoal/10 bg-surface px-3 py-3 text-sm outline-none transition placeholder:text-charcoal/35 focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10"
-                />
-            </ModalBox>
         </>
     )
 }

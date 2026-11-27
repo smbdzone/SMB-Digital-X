@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
 import { FiPlus, FiEdit, FiTrash2, FiEye, FiCalendar, FiDollarSign } from 'react-icons/fi'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
@@ -92,10 +93,6 @@ const Projects = () => {
             toast.showError('Please fill all required fields')
             return
         }
-        if (!form.budget || Number(form.budget) < 0) {
-            toast.showError('Valid budget is required')
-            return
-        }
 
         setLoading(true)
         const payload = {
@@ -104,7 +101,6 @@ const Projects = () => {
             description: form.description.trim(),
             startDate: form.startDate,
             deadline: form.deadline || undefined,
-            budget: Number(form.budget),
             category: form.category,
             status: form.status as Project['status']
         }
@@ -209,7 +205,7 @@ const Projects = () => {
                     <Input label="Client / Company" name="clientName" value={form.clientName} handleChange={handleChange} placeholder="ABC Company" />
                     <Input label="Start Date" name="startDate" type="date" value={form.startDate} handleChange={handleChange} />
                     <Input label="Deadline" name="deadline" type="date" value={form.deadline} handleChange={handleChange} />
-                    <Input label="Budget" name="budget" type="number" value={form.budget} handleChange={handleChange} placeholder="5000" />
+                    <OwnerConsoleNote className="sm:col-span-2">The budget is set in the Owner Console.</OwnerConsoleNote>
                     <Input label="Category" name="category" type="text" value={form.category} handleChange={handleChange} placeholder="Web Development" />
                     <div>
                         <label className="mb-2 block text-sm font-medium text-charcoal">Status</label>

@@ -74,10 +74,13 @@ const writePin = patch => { const p = { ...(readPin() || {}), ...patch, updatedA
 
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status } }
 
-const api = async (method, path, { body, sign } = {}) => {
+const api = async (method, path, { body, sign, attachment, raw } = {}) => {
     const text = body === undefined ? '' : JSON.stringify(body)
     const headers = {}
     if (text) headers['Content-Type'] = 'application/json'
+    // An attachment (signature image, logo) goes next to the signed text; the signed text names its SHA-256.
+    let sendText = text
+    if (attachment) { headers['X-Owner-Attachment'] = '1'; headers['Content-Type'] = 'application/json'; sendText = JSON.stringify({ signed: text, attachment: toB64(attachment) }) }
     const key = sign === true ? S.signingKey : sign
     if (key) {
         const sig = await signRequest(key, { method, path, body: text, ts: Date.now() + S.clockOffset })
@@ -85,10 +88,11 @@ const api = async (method, path, { body, sign } = {}) => {
     }
     let res
     try {
-        res = await fetch(API + path, { method, headers, body: text || undefined, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', mode: 'cors' })
+        res = await fetch(API + path, { method, headers, body: sendText || undefined, credentials: 'omit', cache: 'no-store', referrerPolicy: 'no-referrer', mode: 'cors' })
     } catch {
         throw new ApiError(0, `Cannot reach ${API}. Check the internet connection and try again.`)
     }
+    if (raw && res.ok) return res.blob()
     let json = null
     try { json = await res.json() } catch { /* empty */ }
     if (!res.ok) throw new ApiError(res.status, json?.message || `The server answered ${res.status}.`)
@@ -103,6 +107,7 @@ const lock = (reason = '') => {
     S.signingKey = null
     S.vaultKey = null
     S.lockedReason = reason
+    if (typeof dropSignature === 'function') dropSignature()   // the one-time signature never outlives the session
     clearTimeout(S.idleTimer)
     S.idleTimer = null
     for (const input of document.querySelectorAll('input')) input.value = ''
@@ -506,8 +511,8 @@ const staleVerifyNote = () => {
 }
 
 /** Signed action; remembers the new history position. */
-const act = async (path, body) => {
-    const r = await api('POST', path, { body, sign: true })
+const act = async (path, body, attachment) => {
+    const r = await api('POST', path, { body, sign: true, attachment })
     if (r?.log) writePin({ chainCount: r.log.seq, chainHead: r.log.head })
     return r
 }
@@ -548,7 +553,7 @@ const flagsFor = async keys => {
 
 const mainScreen = () => {
     if (!S.signingKey) return boot()
-    const tabs = [['payroll', 'Payroll'], ['people', 'People'], ['requests', 'Requests'], ['verify', 'Verify'], ['settings', 'Settings']]
+    const tabs = [['payroll', 'Payroll'], ['people', 'People'], ['requests', 'Requests'], ['companies', 'Companies'], ['projects', 'Projects'], ['expenses', 'Expenses'], ['letters', 'Letters'], ['verify', 'Verify'], ['settings', 'Settings']]
     const body = h('div', { id: 'tab-body' })
     const bar = h('div', { class: 'tabs', role: 'tablist' }, ...tabs.map(([id, label]) =>
         h('button', { role: 'tab', id: `tab-${id}`, class: S.tab === id ? 'on' : '', on: { click: () => { S.tab = id; mainScreen() } } }, label)))
@@ -562,7 +567,7 @@ const mainScreen = () => {
         S.rollback ? alertBox('bad', 'WARNING: the owner history is shorter than before',
             h('p', { text: `This console last saw ${S.rollback.was} entries; the server now has ${S.rollback.now}. Entries were removed. Treat this as a security incident.` })) : null,
         bar, body)
-    ;({ payroll: payrollTab, people: peopleTab, requests: requestsTab, verify: verifyTab, settings: settingsTab })[S.tab](body)
+    ;({ payroll: payrollTab, people: peopleTab, requests: requestsTab, companies: companiesTab, projects: projectsTab, expenses: expensesTab, letters: lettersTab, verify: verifyTab, settings: settingsTab })[S.tab](body)
 }
 
 /* ---------------- Payroll ---------------- */
@@ -816,6 +821,18 @@ const requestsTab = async (body, message = null) => {
 
 /* ---------------- Verify everything (history + records) ---------------- */
 
+const extraSummary = by => {
+    const sum = (rows, val, cur) => { const t = {}; for (const r of rows) { const v = val(r); if (v) t[cur(r) ?? '?'] = round2((t[cur(r) ?? '?'] ?? 0) + v) } return Object.entries(t).map(([c, v]) => money(v, c)).join(' + ') || '0' }
+    const companies = by('companies'), projects = by('projects'), ms = by('milestones'), ex = by('expenses').filter(e => !e.isDeleted), lt = by('certificates')
+    return [
+        companies.length ? `Companies: ${companies.length} (${companies.filter(c => c.isActive).length} active): ${companies.map(c => c.name).join(', ')}` : null,
+        projects.length ? `Project budgets: ${projects.filter(p => p.budget > 0).length} of ${projects.length} projects, total ${money(projects.reduce((t, p) => t + p.budget, 0), 'AED')}` : null,
+        ms.length ? `Milestone payments: ${ms.length} (paid ${sum(ms.filter(m => m.paymentStatus === 'paid'), m => m.paymentAmount, m => m.currency)}; invoiced ${sum(ms.filter(m => m.paymentStatus === 'invoiced'), m => m.paymentAmount, m => m.currency)})` : null,
+        ex.length ? `Expenses: ${['pending', 'approved', 'reimbursed', 'rejected'].map(st => `${st} ${ex.filter(e => e.status === st).length} (${sum(ex.filter(e => e.status === st), e => e.totalAmount, e => e.currency)})`).join('; ')}` : null,
+        lt.length ? `Letters and certificates: ${lt.length} (${lt.filter(l => l.status === 'issued').length} issued, ${lt.filter(l => l.status === 'revoked').length} revoked)` : null,
+    ]
+}
+
 const summarize = records => {
     const by = t => records.filter(r => r.key.startsWith(`${t}/`)).map(r => r.state)
     const users = by('users'), salaries = by('salaries'), history = by('history')
@@ -830,6 +847,7 @@ const summarize = records => {
         users.length ? `People with bank details: ${users.filter(u => BANK_FIELDS.some(f => u.bankDetails[f])).length}` : null,
         salaries.length ? `Salary records: ${salaries.length} (paid ${salaries.filter(s => s.status === 'paid').length}: ${sumBy(salaries.filter(s => s.status === 'paid'), s => s.netPay, s => s.currency)}; pending ${salaries.filter(s => s.status === 'pending').length}: ${sumBy(salaries.filter(s => s.status === 'pending'), s => s.netPay, s => s.currency)})` : null,
         history.length ? `Salary-history entries: ${history.length}` : null,
+        ...extraSummary(by),
     ].filter(Boolean)
 }
 

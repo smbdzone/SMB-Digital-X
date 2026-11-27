@@ -8,6 +8,7 @@ import {
     deleteProjectController
 } from '../controller/project.controller.js'
 import { isAllow } from '../middlewares/isVerified.js'
+import { projectCreateGuard, projectDeleteGuard, projectUpdateGuard } from '../middlewares/moneyGuards.js'
 
 const router = Router()
 
@@ -15,14 +16,14 @@ const router = Router()
 // controller (the admin sees every project, an employee only projects they have tasks in).
 const adminOnly = isAllow(['admin'])
 
-router.post('/', adminOnly, createProjectController)
+router.post('/', adminOnly, projectCreateGuard, createProjectController)   // budget: Owner Console
 
 router.get('/', getProjectsController)
 
 router.get('/:id', getProjectController)
 
-router.patch('/:id', adminOnly, updateProjectController)
+router.patch('/:id', adminOnly, projectUpdateGuard, updateProjectController)
 
-router.delete('/:id', adminOnly, deleteProjectController)
+router.delete('/:id', adminOnly, projectDeleteGuard, deleteProjectController)
 
 export default router

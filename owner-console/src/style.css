@@ -57,6 +57,12 @@ td.mono, .mono { font-family: var(--mono); }
 .steps b { color: var(--amber); }
 .ok { color: var(--green); } .bad { color: var(--red); }
 #sheet { display: none; }
+img.sig { max-height: 90px; background: #fff; border-radius: 4px; padding: 6px; margin: 8px 0; }
+iframe.pdf { width: 100%; height: 720px; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
+pre.letter-text { white-space: pre-wrap; font: 14px/1.5 var(--sans); background: #0f1115; padding: 12px; border-radius: 4px; }
+textarea { width: 100%; background: #0f1115; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 11px 12px; font: 14px/1.5 var(--mono); }
+select { background: #0f1115; color: var(--text); border: 1px solid var(--line); border-radius: 4px; padding: 8px; }
+.tabs { flex-wrap: wrap; }
 
 /* Printing: only the recovery sheet. */
 @media print {

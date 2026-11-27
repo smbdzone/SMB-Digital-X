@@ -2,16 +2,15 @@ import { Router } from 'express'
 
 import {
     createExpenseController,
-    deleteExpenseController,
     deleteReceiptController,
     getAllExpenses,
     getExpenseController,
     getProjectExpensesController,
     updateExpenseController,
-    updateExpenseStatusController,
     uploadReceiptController,
 } from '../controller/expense.controller.js'
-import { isAllow, isVerified } from '../middlewares/isVerified.js'
+import { isVerified } from '../middlewares/isVerified.js'
+import { ownerConsoleOnly } from '../middlewares/ownerConsoleOnly.js'
 import { upload } from '../middlewares/multer.js'
 
 const router = Router()
@@ -26,8 +25,9 @@ router.get('/project/:projectId', getProjectExpensesController)
 
 router.get('/:id', getExpenseController)
 router.patch('/:id', updateExpenseController)
-router.patch('/:id/status', isAllow(['admin']), updateExpenseStatusController)
-router.delete('/:id', isAllow(['admin']), deleteExpenseController)
+// Approve / reject / reimburse and delete are done in the Owner Console: refused here for everyone.
+router.patch('/:id/status', ownerConsoleOnly)
+router.delete('/:id', ownerConsoleOnly)
 
 router.post('/:id/receipts', upload.single('receipt'), uploadReceiptController)
 router.delete('/:id/receipts/:receiptId', deleteReceiptController)

@@ -357,6 +357,7 @@ export const previewCertificate = async (ctx: IssueContext, employeeId: string) 
         signatory: p.signatory,
         recipient: { name: p.employee.name, email: p.employee.email, position: p.employee.position },
         companyName: p.company.name,
+        companyId: String(p.company._id),
         willRememberWording: p.content.pendingSave,
         ...placeholderInfo(p.content.title, p.content.body, p.content.subject, p.content.legacy),
     }
@@ -400,7 +401,8 @@ export interface IssueResult {
     email?: EmailOutcome
 }
 
-export const issueCertificate = async (ctx: IssueContext, employeeId: string): Promise<IssueResult> => {
+/** `id`: the record id to use (the Owner Console chooses it, so it can sign the letter's state before it exists). */
+export const issueCertificate = async (ctx: IssueContext, employeeId: string, id?: string): Promise<IssueResult> => {
     const p = await prepare(ctx, employeeId)
 
     await rememberContent(ctx, p.content)
@@ -408,6 +410,7 @@ export const issueCertificate = async (ctx: IssueContext, employeeId: string): P
     const referenceNo = await nextReference(p.company, p.content.kind, p.issueDate)
 
     const certificate = await Certificate.create({
+        ...(id ? { _id: new Types.ObjectId(id) } : {}),
         referenceNo,
         employeeId: p.employee._id,
         companyId: p.company._id,

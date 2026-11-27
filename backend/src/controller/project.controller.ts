@@ -39,10 +39,10 @@ export const createProjectController = async (
             employees
         } = req.body
 
-        if (!name || !clientName || !startDate || budget === undefined || !category) {
+        if (!name || !clientName || !startDate || !category) {
             res.status(400).json({
                 success: false,
-                message: 'name, clientName, startDate, category and budget are required'
+                message: 'name, clientName, startDate and category are required'
             })
             return
         }
@@ -54,7 +54,7 @@ export const createProjectController = async (
             startDate,
             deadline,
             category,
-            budget,
+            budget: 0,   // set in the Owner Console (the guard refuses a budget here)
             status,
             employees: employees || []
         })
@@ -161,9 +161,12 @@ export const updateProjectController = async (
     try {
         const { id } = req.params
 
+        // Only the project's own fields; the budget is set in the Owner Console (the guard refuses a changed one).
+        const ALLOWED = ['name', 'clientName', 'description', 'category', 'startDate', 'deadline', 'status', 'employees']
+        const changes = Object.fromEntries(Object.entries(req.body ?? {}).filter(([k]) => ALLOWED.includes(k)))
         const project = await Project.findByIdAndUpdate(
             id,
-            req.body,
+            changes,
             {
                 new: true,
                 runValidators: true

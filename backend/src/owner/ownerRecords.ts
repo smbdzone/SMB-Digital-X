@@ -1,10 +1,16 @@
 import User from '../model/user.model.js'
 import Salary from '../model/salary.model.js'
 import EmployeeHistory from '../model/employeeHistory.model.js'
+import Company from '../model/company.model.js'
+import Project from '../model/project.model.js'
+import Milestone from '../model/milestone.model.js'
+import Expense from '../model/expense.model.js'
+import Certificate from '../model/certificate.model.js'
 import { badRequest } from '../utils/http.js'
 import { ownerLogEntries } from './owner.service.js'
 import {
-    CurrentRecord, IntegrityResult, RECORD_TYPES, RecordType, STATE_OF, canonicalJson, checkIntegrity, historyState, keyOf,
+    CurrentRecord, IntegrityResult, RECORD_TYPES, RecordType, STATE_OF, canonicalJson, certificateState, checkIntegrity, companyState,
+    expenseState, historyState, keyOf, milestoneState, projectState,
     latestSignedStates, parseKey, salaryState, stateHash, userState,
 } from './ownerState.js'
 
@@ -24,6 +30,24 @@ export const currentRecords = async (types: RecordType[] = RECORD_TYPES): Promis
     if (types.includes('history')) {
         const rows = await EmployeeHistory.find({ $or: [{ fromSalary: { $ne: null } }, { toSalary: { $ne: null } }] }).lean()
         for (const h of rows) out.push({ key: keyOf('history', h._id), label: `Salary history: ${nameOf.get(String(h.employeeId)) ?? '?'}, ${h.title}`, state: historyState(h) })
+    }
+    if (types.includes('companies')) {
+        for (const c of await Company.find().lean()) out.push({ key: keyOf('companies', c._id), label: `Company: ${c.name} (${c.code})`, state: companyState(c) })
+    }
+    const projects = (types.includes('projects') || types.includes('milestones')) ? await Project.find().select('name budget').lean() : []
+    const projectName = new Map(projects.map(p => [String(p._id), p.name]))
+    if (types.includes('projects')) {
+        for (const p of projects) out.push({ key: keyOf('projects', p._id), label: `Project budget: ${p.name}`, state: projectState(p) })
+    }
+    if (types.includes('milestones')) {
+        for (const m of await Milestone.find().lean()) out.push({ key: keyOf('milestones', m._id), label: `Milestone payment: ${projectName.get(String(m.projectId)) ?? '?'} / ${m.title}`, state: milestoneState(m) })
+    }
+    if (types.includes('expenses')) {
+        // Straight from the collection: the model hides deleted expenses, but a deleted one is still a signed record.
+        for (const e of (await Expense.collection.find({}).toArray()) as any[]) out.push({ key: keyOf('expenses', e._id), label: `Expense: ${e.description} (${e.currency} ${e.totalAmount}, ${nameOf.get(String(e.addedBy)) ?? '?'})`, state: expenseState(e) })
+    }
+    if (types.includes('certificates')) {
+        for (const c of await Certificate.find().lean()) out.push({ key: keyOf('certificates', c._id), label: `Letter ${c.referenceNo}: ${c.recipient?.name ?? '?'}`, state: certificateState(c), signed: !!c.signedAt })
     }
     return out
 }
@@ -53,7 +77,7 @@ export const assertCanonical = (key: string, state: unknown) => {
 
 export const sealOf = (key: string, state: unknown, seq: number | null = null) => ({ seq, hash: stateHash(key, state) })
 
-export const MODEL_OF = { users: User, salaries: Salary, history: EmployeeHistory } as const
+export const MODEL_OF = { users: User, salaries: Salary, history: EmployeeHistory, companies: Company, projects: Project, milestones: Milestone, expenses: Expense, certificates: Certificate } as const
 
 /** After the history entry is written: point each record's seal at it. */
 export const setSealSeq = async (keys: string[], seq: number) => {

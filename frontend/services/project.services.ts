@@ -36,7 +36,7 @@ export interface CreateProjectPayload {
     description?: string;
     startDate: string;
     deadline?: string;
-    budget: number;
+    budget?: number;   // set in the Owner Console; the website sends none
     status?: ProjectStatus;
     employees?: string[];
 }

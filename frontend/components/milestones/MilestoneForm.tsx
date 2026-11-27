@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useRef, useState } from 'react'
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote'
 import { FiPlus, FiTrash2 } from 'react-icons/fi'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
@@ -135,18 +136,6 @@ const MilestoneForm = ({ open, onClose, projectId, milestone, budget, defaultCur
         }
         if (!/^[A-Za-z]{3}$/.test(form.currency.trim())) return toast.showError('Currency must be a 3-letter code, for example AED')
 
-        let payment: Pick<MilestonePayload, 'paymentPercentage' | 'paymentAmount'> = {}
-        if (form.paymentValue !== '') {
-            const value = Number(form.paymentValue)
-            if (!Number.isFinite(value) || value < 0) return toast.showError('Payment must be a number of 0 or more')
-            if (form.paymentMode === 'percentage') {
-                if (value > 100) return toast.showError('Payment percentage cannot be more than 100')
-                payment = { paymentPercentage: value }
-            } else {
-                payment = { paymentAmount: value }
-            }
-        }
-
         const items: DeliverablePayload[] = deliverables
             .filter(d => d.title.trim())
             .map(d => ({
@@ -161,9 +150,7 @@ const MilestoneForm = ({ open, onClose, projectId, milestone, budget, defaultCur
             notes: form.notes.trim(),
             currency: form.currency.trim().toUpperCase(),
             status: form.status,
-            paymentStatus: form.paymentStatus,
             deliverables: items,
-            ...payment,
         }
 
         if (isEdit) {
@@ -202,26 +189,9 @@ const MilestoneForm = ({ open, onClose, projectId, milestone, budget, defaultCur
 
             {/* Payment */}
             <div className="mt-6 border-t border-charcoal/5 pt-5">
-                <h5 className="text-sm font-semibold text-charcoal">Payment</h5>
-                <p className="mt-0.5 text-xs text-charcoal/50">Enter a percentage or an amount. The other one is calculated from the project budget.</p>
+                <h5 className="text-sm font-semibold text-charcoal">Status and currency</h5>
+                <OwnerConsoleNote className="mt-2">The payment (share of the budget, invoiced, paid) is set in the Owner Console.</OwnerConsoleNote>
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-                    <SelectField
-                        label="Enter payment as"
-                        value={form.paymentMode}
-                        onChange={e => setForm(p => ({ ...p, paymentMode: e.target.value as PaymentMode, paymentValue: '' }))}
-                        options={[{ value: 'percentage', label: 'Percentage of budget' }, { value: 'amount', label: 'Fixed amount' }]}
-                    />
-                    <Input
-                        label={form.paymentMode === 'percentage' ? 'Percentage (%)' : 'Amount'}
-                        name="paymentValue"
-                        type="number"
-                        min={0}
-                        max={form.paymentMode === 'percentage' ? 100 : undefined}
-                        value={form.paymentValue}
-                        handleChange={handleChange}
-                        placeholder={form.paymentMode === 'percentage' ? '30' : '5000'}
-                        helperText={paymentHint()}
-                    />
                     <Input
                         label="Currency"
                         name="currency"
@@ -229,7 +199,6 @@ const MilestoneForm = ({ open, onClose, projectId, milestone, budget, defaultCur
                         value={form.currency}
                         handleChange={e => setForm(p => ({ ...p, currency: e.target.value.toUpperCase() }))}
                     />
-                    <SelectField label="Payment status" name="paymentStatus" value={form.paymentStatus} onChange={handleChange} options={MILESTONE_PAYMENT_OPTIONS} />
                     <SelectField label="Milestone status" name="status" value={form.status} onChange={handleChange} options={MILESTONE_STATUS_OPTIONS} />
                 </div>
             </div>

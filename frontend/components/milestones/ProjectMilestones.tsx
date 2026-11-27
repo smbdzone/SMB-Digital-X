@@ -224,9 +224,7 @@ const MilestoneItem = ({
                                 </label>
                                 <label className="flex items-center gap-2 text-xs text-charcoal/50">
                                     Payment
-                                    <select value={m.paymentStatus} disabled={busy} onChange={e => onPayment(e.target.value as MilestonePaymentStatus)} className={selectClass}>
-                                        {MILESTONE_PAYMENT_OPTIONS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                                    </select>
+                                    <span className="font-medium text-charcoal/70" title="Set in the Owner Console">{MILESTONE_PAYMENT_OPTIONS.find(o => o.value === m.paymentStatus)?.label ?? m.paymentStatus}</span>
                                 </label>
                                 {m.completedAt && <span className="text-xs text-charcoal/45">Completed {formatDate(m.completedAt)}</span>}
                                 {m.invoicedAt && <span className="text-xs text-charcoal/45">Invoiced {formatDate(m.invoicedAt)}</span>}

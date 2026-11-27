@@ -25,7 +25,7 @@ const S = {
     publicKey: null,      // SPKI base64 of the unlocked key
     fingerprint: null,
     clockOffset: 0,       // server time - laptop time
-    tab: 'salaries',
+    tab: 'payroll',
     idleTimer: null,
     lockedReason: '',
 }
@@ -405,7 +405,7 @@ const finishLogin = async (keys, publicKey) => {
     const { challenge, serverTime } = await api('POST', '/api/owner/challenge')
     S.clockOffset = serverTime - Date.now()
     S.signingKey = keys.signingKey; S.vaultKey = keys.vaultKey; S.publicKey = publicKey; S.fingerprint = fp
-    S.tab = 'salaries'   // every unlock starts on the main list
+    S.tab = 'payroll'   // every unlock starts on the main list
     const r = await api('POST', '/api/owner/login', { body: { challenge }, sign: true })
     S.rollback = null
     if (pin?.chainCount && r.log.count < pin.chainCount) S.rollback = { was: pin.chainCount, now: r.log.count }
@@ -493,9 +493,62 @@ const forgotScreen = () => {
 /* Main                                                                */
 /* ------------------------------------------------------------------ */
 
+const DAY = 24 * 3600_000
+const verifiedAgo = () => { const p = readPin(); return p?.verifiedAt ? Date.now() - new Date(p.verifiedAt).getTime() : null }
+const verifiedText = () => { const a = verifiedAgo(); return a === null ? 'never' : a < DAY ? 'today' : `${Math.floor(a / DAY)} day(s) ago` }
+/** Before running payroll or paying: a warning if Verify everything has not run in the last 7 days. */
+const staleVerifyNote = () => {
+    const a = verifiedAgo()
+    if (a !== null && a <= 7 * DAY) return null
+    return alertBox('bad', 'Run "Verify everything" first',
+        h('p', { text: `It last ran: ${verifiedText()}. Before running payroll or paying, check that nobody changed amounts, pay profiles or bank details behind the console's back.` }),
+        h('button', { class: 'secondary', on: { click: () => { S.tab = 'verify'; mainScreen() } } }, 'Go to Verify everything'))
+}
+
+/** Signed action; remembers the new history position. */
+const act = async (path, body) => {
+    const r = await api('POST', path, { body, sign: true })
+    if (r?.log) writePin({ chainCount: r.log.seq, chainHead: r.log.head })
+    return r
+}
+const money = (n, cur) => (n === null || n === undefined ? '-' : fmtMoney(n, cur))
+const numInput = (id, value, extra = {}) => h('input', { id, type: 'text', inputmode: 'decimal', value: value ?? '', autocomplete: 'off', ...extra })
+const parseAmount = (v, label) => {
+    const t = String(v ?? '').trim().replace(/,/g, '')
+    if (t === '') return null
+    const n = Number(t)
+    if (!Number.isFinite(n) || n < 0) throw new Error(`${label}: enter an amount of 0 or more`)
+    return round2(n)
+}
+const dubaiMonth = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Dubai', year: 'numeric', month: '2-digit' }).format(new Date()).slice(0, 7)
+
+/** Editable list of { name, amount } rows (allowances, deductions). */
+const lineItemsEditor = (id, rows, disabled = false) => {
+    const list = h('div', { id })
+    const addRow = (r = { name: '', amount: '' }) => {
+        const row = h('div', { class: 'row', 'data-row': '1' },
+            h('input', { type: 'text', class: 'li-name', value: r.name, placeholder: 'Name', disabled }),
+            numInput(undefined, r.amount, { class: 'li-amount', placeholder: 'Amount', disabled }),
+            disabled ? null : h('button', { class: 'link', type: 'button', on: { click: () => row.remove() } }, 'Remove'))
+        list.append(row)
+    }
+    rows.forEach(addRow)
+    const node = h('div', {}, list, disabled ? null : h('button', { class: 'link', type: 'button', id: `${id}-add`, on: { click: () => addRow() } }, '+ Add line'))
+    const read = label => [...list.querySelectorAll('[data-row]')].map(r => ({ name: r.querySelector('.li-name').value.trim(), amount: parseAmount(r.querySelector('.li-amount').value, label) ?? 0 }))
+        .filter(i => i.name || i.amount).map(i => { if (!i.name) throw new Error(`${label}: every line needs a name`); return i })
+    return { node, read }
+}
+
+/** Integrity check for some records only (before paying): returns the flags for those keys. */
+const flagsFor = async keys => {
+    const [log, integ] = await Promise.all([api('GET', '/api/owner/log', { sign: true }), api('GET', '/api/owner/integrity', { sign: true })])
+    const r = await checkIntegrity(log.entries, integ.records)
+    return r.flags.filter(f => keys.includes(f.key))
+}
+
 const mainScreen = () => {
     if (!S.signingKey) return boot()
-    const tabs = [['salaries', 'Salaries'], ['history', 'History'], ['settings', 'Settings']]
+    const tabs = [['payroll', 'Payroll'], ['people', 'People'], ['requests', 'Requests'], ['verify', 'Verify'], ['settings', 'Settings']]
     const body = h('div', { id: 'tab-body' })
     const bar = h('div', { class: 'tabs', role: 'tablist' }, ...tabs.map(([id, label]) =>
         h('button', { role: 'tab', id: `tab-${id}`, class: S.tab === id ? 'on' : '', on: { click: () => { S.tab = id; mainScreen() } } }, label)))
@@ -503,85 +556,359 @@ const mainScreen = () => {
         h('div', { class: 'status-bar' },
             h('span', {}, 'Key ', h('span', { class: 'fp', id: 'main-fp', text: S.fingerprint })),
             h('span', { class: 'spacer' }),
+            h('span', { id: 'last-verified', text: `Verify everything: ${verifiedText()}` }),
             h('span', { text: `Locks after ${Math.round(IDLE_MS / 60000) || '<1'} min idle` }),
             h('button', { class: 'secondary', id: 'lock-now', on: { click: () => lock('Locked.') } }, 'Lock')),
         S.rollback ? alertBox('bad', 'WARNING: the owner history is shorter than before',
             h('p', { text: `This console last saw ${S.rollback.was} entries; the server now has ${S.rollback.now}. Entries were removed. Treat this as a security incident.` })) : null,
         bar, body)
-    ;({ salaries: salariesTab, history: historyTab, settings: settingsTab })[S.tab](body)
+    ;({ payroll: payrollTab, people: peopleTab, requests: requestsTab, verify: verifyTab, settings: settingsTab })[S.tab](body)
 }
 
-const salariesTab = async (body, carried = null) => {
-    body.replaceChildren(h('p', { class: 'muted', text: 'Loading pending salaries…' }))
-    let rows
-    try { rows = await api('GET', '/api/owner/salaries?status=pending', { sign: true }) }
+/* ---------------- Payroll ---------------- */
+
+const payrollTab = async (body, month = S.month ?? dubaiMonth(), message = null) => {
+    S.month = month
+    body.replaceChildren(h('p', { class: 'muted', text: 'Loading payroll…' }))
+    let d
+    try { d = await api('GET', `/api/owner/payroll?month=${encodeURIComponent(month)}`, { sign: true }) }
     catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
-    const msg = carried ?? h('div', { id: 'pay-result' })
-    const table = h('table', {}, h('thead', {}, h('tr', {}, ...['Employee', 'Company', 'Month', 'Net pay', ''].map(t => h('th', { text: t })))),
-        h('tbody', {}, ...rows.map(r => {
-            const btn = h('button', { class: 'secondary', 'data-id': r.id })
-            btn.textContent = 'Mark paid'
-            btn.addEventListener('click', () => {
-                if (btn.dataset.confirm !== '1') { btn.dataset.confirm = '1'; btn.textContent = 'Confirm: mark paid'; btn.className = ''; return }
-                busy(btn, 'Paying…', async () => {
-                    try {
-                        const res = await api('POST', `/api/owner/salaries/${r.id}/pay`, { body: {}, sign: true })
-                        writePin({ chainCount: res.log.seq, chainHead: res.log.head })
-                        msg.replaceChildren(alertBox('good', null, h('p', { text: `${r.employee}, ${r.month}: marked paid (slip email: ${res.slipEmail}). Recorded in your history as entry #${res.log.seq}.` })))
-                        salariesTab(body, msg)
-                    } catch (e) {
-                        msg.replaceChildren(alertBox('bad', null, h('p', { text: e.message })))
-                    }
-                })
+    const msg = h('div', { id: 'payroll-result' }, message)
+    const say = (kind, text) => msg.replaceChildren(alertBox(kind, null, h('p', { text })))
+    const reload = text => payrollTab(body, month, text ? alertBox('good', null, h('p', { text })) : null)
+    const monthIn = h('input', { type: 'month', id: 'payroll-month', value: month, on: { change: e => e.target.value && payrollTab(body, e.target.value) } })
+    const pending = d.salaries.filter(s => s.state.status === 'pending')
+    const totals = {}
+    for (const s of pending) totals[s.state.currency] = round2((totals[s.state.currency] ?? 0) + s.state.netPay)
+
+    const run = h('button', { id: 'run-payroll', on: { click: () => {
+        if (run.dataset.confirm !== '1') { run.dataset.confirm = '1'; run.textContent = `Confirm: run payroll for ${month}`; return }
+        busy(run, 'Running…', async () => {
+            try {
+                const r = await act('/api/owner/payroll/run', { action: 'payroll.run', month })
+                const skipped = r.skipped.length ? ` Skipped ${r.skipped.length}: ${r.skipped.map(s => `${s.name} (${s.reason})`).join('; ')}.` : ''
+                reload(`Payroll ${month}: ${r.created} new pending record(s), ${r.alreadyExisted} already existed.${skipped}`)
+            } catch (e) { say('bad', e.message) }
+        })
+    } } }, `Run payroll for ${month}`)
+
+    const pay = async (rows, button) => {
+        const keys = rows.flatMap(s => [s.key, `users/${s.state.employeeId}`])
+        const flags = await flagsFor(keys)
+        if (flags.length) {
+            return msg.replaceChildren(alertBox('bad', 'Not paid: these records were changed outside the Owner Console',
+                h('ul', {}, ...flags.map(f => h('li', { text: `${f.label}: ${f.problem}` }))), h('p', { text: 'Open Verify everything for the details.' })))
+        }
+        const changes = rows.map(s => ({ key: s.key, state: { ...s.state, status: 'paid', paymentDetails: s.employeeBank && BANK_FIELDS.some(f => s.employeeBank[f]) ? { ...s.employeeBank, reference: null } : null } }))
+        const r = await act('/api/owner/payroll/salaries', { action: 'salary.pay', changes })
+        const sent = Object.values(r.emails).filter(x => x === 'sent').length
+        reload(`Paid ${r.count} salar${r.count === 1 ? 'y' : 'ies'}. Slip emails sent: ${sent} of ${r.count}. Recorded as entry #${r.log.seq}.`)
+        void button
+    }
+
+    const payAll = h('button', { id: 'pay-all', disabled: !pending.length, on: { click: () => {
+        if (payAll.dataset.confirm !== '1') { payAll.dataset.confirm = '1'; payAll.textContent = `Confirm: pay all ${pending.length} pending (${Object.entries(totals).map(([c, t]) => money(t, c)).join(' + ')})`; return }
+        busy(payAll, 'Paying…', () => pay(pending, payAll).catch(e => say('bad', e.message)))
+    } } }, `Pay all pending (${pending.length})`)
+
+    const editor = h('div', { id: 'salary-editor' })
+    const edit = s => {
+        const paid = s.state.status === 'paid'
+        const basic = numInput('ed-salary', s.state.salary, { disabled: paid })
+        const currency = h('input', { id: 'ed-currency', type: 'text', value: s.state.currency, maxlength: 3, disabled: paid })
+        const company = h('select', { id: 'ed-company', disabled: paid }, ...d.companies.map(c => h('option', { value: c.id, selected: c.id === s.state.companyId }, c.name + (c.isActive ? '' : ' (inactive)'))))
+        const al = lineItemsEditor('ed-allowances', s.state.allowances, paid), de = lineItemsEditor('ed-deductions', s.state.deductions, paid)
+        const notes = h('input', { id: 'ed-notes', type: 'text', value: s.state.notes ?? '' })
+        const save = h('button', { id: 'ed-save', on: { click: () => busy(save, 'Saving…', async () => {
+            try {
+                const next = { ...s.state, notes: notes.value.trim() }
+                if (!paid) {
+                    next.salary = parseAmount(basic.value, 'Basic salary'); next.currency = currency.value.trim().toUpperCase(); next.companyId = company.value
+                    next.allowances = al.read('Allowances'); next.deductions = de.read('Deductions')
+                    Object.assign(next, computeTotals(next))
+                }
+                await act('/api/owner/payroll/salaries', { action: 'salary.update', changes: [{ key: s.key, state: normalizeSalary(next) }] })
+                reload(`Saved: ${s.employee}, ${month}.`)
+            } catch (e) { say('bad', e.message) }
+        }) } }, 'Save (signed)')
+        editor.replaceChildren(h('div', { class: 'panel' }, h('h3', { text: `Edit salary: ${s.employee}, ${month}` }),
+            paid ? h('p', { class: 'small muted', text: 'Paid salaries are locked: only the notes can change.' }) : null,
+            ...field('Basic salary', basic), ...field('Currency', currency), h('label', { text: 'Paying company' }), company,
+            h('label', { text: 'Allowances' }), al.node, h('label', { text: 'Deductions' }), de.node, ...field('Notes', notes), h('p'),
+            h('div', { class: 'row' }, save, h('button', { class: 'secondary', on: { click: () => editor.replaceChildren() } }, 'Cancel'))))
+        editor.scrollIntoView?.()
+    }
+
+    const rowsEl = d.salaries.map(s => {
+        const st = s.state
+        const actions = []
+        if (st.status === 'pending') {
+            const pb = h('button', { 'data-pay': s.id })
+            pb.textContent = 'Pay'
+            pb.addEventListener('click', () => {
+                if (pb.dataset.confirm !== '1') { pb.dataset.confirm = '1'; pb.textContent = `Confirm: pay ${money(st.netPay, st.currency)}`; return }
+                busy(pb, 'Paying…', () => pay([s], pb).catch(e => say('bad', e.message)))
             })
-            return h('tr', {}, h('td', { text: r.employee }), h('td', { text: r.company }), h('td', { class: 'mono', text: r.month }),
-                h('td', { class: 'mono', text: fmtMoney(r.netPay, r.currency) }), h('td', {}, btn))
-        })))
-    body.replaceChildren(msg, h('div', { class: 'panel' }, h('h2', { text: 'Pending salaries' }),
-        rows.length ? table : h('p', { class: 'muted', text: 'No pending salaries.' }),
-        h('p', { class: 'small muted', text: 'Each payment is signed with your key and recorded in your history. Click once, then confirm.' })))
+            actions.push(h('button', { class: 'secondary', 'data-edit': s.id, on: { click: () => edit(s) } }, 'Edit'), pb)
+        } else {
+            const rb = h('button', { class: 'secondary', 'data-resend': s.id, on: { click: () => busy(rb, 'Sending…', async () => {
+                try { const r = await act(`/api/owner/payroll/salaries/${s.id}/resend`, { action: 'salary.resend' }); reload(`Slip for ${s.employee}: ${r.email}.`) }
+                catch (e) { say('bad', e.message) }
+            }) } }, 'Resend slip')
+            actions.push(h('button', { class: 'secondary', 'data-edit': s.id, on: { click: () => edit(s) } }, 'Notes'), rb)
+        }
+        const bankLine = s.employeeBank?.iban || s.employeeBank?.accountNumber || '(no bank details)'
+        return h('tr', { 'data-salary': s.id }, h('td', { text: s.employee }), h('td', { text: s.company }), h('td', { class: 'mono', text: money(st.netPay, st.currency) }),
+            h('td', { class: st.status === 'paid' ? 'ok' : '', text: st.status }), h('td', { class: 'mono small', text: bankLine }), h('td', {}, h('div', { class: 'row' }, ...actions)))
+    })
+
+    body.replaceChildren(staleVerifyNote() ?? '', msg,
+        h('div', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { text: 'Payroll' }), h('span', { class: 'spacer' }), monthIn),
+            h('p', { class: 'small muted', text: `Pending this month: ${pending.length} (${Object.entries(totals).map(([c, t]) => money(t, c)).join(' + ') || 'nothing'}). Pending in other months: ${d.otherPending}.` }),
+            h('div', { class: 'row' }, run, payAll),
+            d.salaries.length
+                ? h('table', { id: 'payroll-table' }, h('thead', {}, h('tr', {}, ...['Employee', 'Company', 'Net pay', 'Status', 'Bank', ''].map(t => h('th', { text: t })))), h('tbody', {}, ...rowsEl))
+                : h('p', { class: 'muted', text: 'No salary records for this month yet. "Run payroll" creates them from the signed pay profiles.' })),
+        editor)
 }
 
-const historyTab = body => {
-    const out = h('div', { id: 'verify-result' })
-    const list = h('div')
-    const go = h('button', { id: 'verify-all', on: { click: () => busy(go, 'Verifying…', async () => {
-        out.replaceChildren(); list.replaceChildren()
-        try {
-            const d = await api('GET', '/api/owner/log', { sign: true })
-            const pin = readPin()
-            const fp = await fingerprint(d.publicKey)
-            const problems = []
-            if (fp !== S.fingerprint) problems.push({ seq: '-', problem: `the server verifies with a different key (${fp})` })
-            const v = await verifyChain(d.entries, S.publicKey)   // always with the key this console unlocked
-            problems.push(...v.problems)
-            if (pin?.chainCount && v.count < pin.chainCount) problems.push({ seq: '-', problem: `the history is shorter than when last checked here (${pin.chainCount} entries before, ${v.count} now)` })
-            if (pin?.chainCount && pin.chainHead && v.count >= pin.chainCount) {
-                const then = d.entries.find(e => e.seq === pin.chainCount)
-                if (!then || then.hash !== pin.chainHead) problems.push({ seq: pin.chainCount, problem: 'differs from the entry this console saw before (the history was rewritten)' })
-            }
-            if (!problems.length) {
-                writePin({ chainCount: v.count, chainHead: v.head, verifiedAt: new Date().toISOString() })
-                out.replaceChildren(alertBox('good', `✔ Everything verified: ${v.count} entries`,
-                    h('p', {}, 'Chain fingerprint: ', h('span', { class: 'fp small', id: 'chain-fp', text: shortHash(v.head) })),
-                    h('p', { class: 'small', text: 'Every link and every signature checks out with your key. Compare the chain fingerprint and the entry count with your latest daily report email.' })))
-            } else {
-                out.replaceChildren(alertBox('bad', `✘ Problems found (${problems.length})`,
-                    h('ul', { id: 'verify-problems' }, ...problems.map(p => h('li', { text: `Entry ${p.seq}: ${p.problem}` }))),
-                    h('p', {}, 'Chain fingerprint now: ', h('span', { class: 'fp small', text: shortHash(v.head) })),
-                    h('p', { text: 'Someone changed your owner history on the server. Treat this as a security incident.' })))
-            }
-            list.replaceChildren(h('div', { class: 'panel' }, h('h3', { text: 'History' }),
-                h('table', {}, h('thead', {}, h('tr', {}, ...['#', 'Time', 'Action', 'Record', 'Result'].map(t => h('th', { text: t })))),
-                    h('tbody', {}, ...[...d.entries].reverse().map(e => h('tr', {},
-                        h('td', { class: 'mono', text: e.seq }), h('td', { text: fmtDate(e.at) }), h('td', { class: 'mono', text: e.action }),
-                        h('td', { class: 'mono small', text: e.recordId ?? '' }), h('td', { class: 'small', text: e.result ?? '' })))))))
-        } catch (e) {
-            out.replaceChildren(alertBox('bad', null, h('p', { text: e.message })))
+/* ---------------- People ---------------- */
+
+const HISTORY_TYPES = ['salary_increase', 'salary_decrease', 'promotion', 'demotion', 'joined', 'position_change', 'transfer', 'rejoined', 'other']
+
+const peopleTab = async (body, message = null, openId = null) => {
+    body.replaceChildren(h('p', { class: 'muted', text: 'Loading people…' }))
+    let d
+    try { d = await api('GET', '/api/owner/people', { sign: true }) }
+    catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+    const msg = h('div', { id: 'people-result' }, message)
+    const say = (kind, text) => msg.replaceChildren(alertBox(kind, null, h('p', { text })))
+    const companyName = id => d.companies.find(c => c.id === id)?.name ?? '-'
+    const editor = h('div', { id: 'person-editor' })
+
+    const open = (p) => {
+        const isNew = !p
+        const s = p?.state ?? normalizeUser({ role: 'employee', status: 'active', salary: { currency: 'AED', allowances: [] } })
+        const lock = !!p?.isOwner
+        const inp = (id, v, extra = {}) => h('input', { id, type: 'text', value: v ?? '', autocomplete: 'off', ...extra })
+        const name = inp('pe-name', s.name), email = inp('pe-email', s.email), position = inp('pe-position', s.position)
+        const company = h('select', { id: 'pe-company' }, h('option', { value: '' }, '(none)'), ...d.companies.map(c => h('option', { value: c.id, selected: c.id === s.companyId }, c.name)))
+        const role = h('select', { id: 'pe-role', disabled: lock }, ...['employee', 'admin'].map(r => h('option', { value: r, selected: s.role === r }, r)))
+        const status = h('select', { id: 'pe-status', disabled: lock }, ...['active', 'inactive'].map(r => h('option', { value: r, selected: s.status === r }, r)))
+        const approver = h('input', { id: 'pe-approver', type: 'checkbox', checked: s.canApproveDeliverables })
+        const amount = numInput('pe-salary', s.salary.amount), currency = inp('pe-currency', s.salary.currency, { maxlength: 3 })
+        const al = lineItemsEditor('pe-allowances', s.salary.allowances)
+        const bank = Object.fromEntries(BANK_FIELDS.map(f => [f, inp(`pe-bank-${f}`, s.bankDetails[f])]))
+        const save = h('button', { id: 'pe-save', on: { click: () => busy(save, 'Saving…', async () => {
+            try {
+                const next = normalizeUser({
+                    name: name.value, email: email.value, position: position.value, companyId: company.value || null, role: role.value, status: status.value,
+                    canApproveDeliverables: approver.checked,
+                    salary: { amount: parseAmount(amount.value, 'Salary'), currency: currency.value.trim().toUpperCase() || null, allowances: al.read('Allowances') },
+                    bankDetails: Object.fromEntries(BANK_FIELDS.map(f => [f, bank[f].value])),
+                })
+                const id = p?.id ?? newRecordId()
+                await act('/api/owner/people', { action: isNew ? 'user.create' : 'user.update', changes: [{ key: `users/${id}`, state: next }] })
+                peopleTab(body, alertBox('good', null, h('p', { text: isNew ? `${next.name} added. They get an email to choose their password.` : `Saved: ${next.name}.` })), id)
+            } catch (e) { say('bad', e.message) }
+        }) } }, isNew ? 'Add person (signed)' : 'Save (signed)')
+        const hist = h('div', { id: 'salary-history' })
+        editor.replaceChildren(h('div', { class: 'panel' }, h('h3', { text: isNew ? 'Add a person' : `${s.name}` }),
+            lock ? h('p', { class: 'small muted', text: 'This is your own account: it stays an active admin.' }) : null,
+            ...field('Name', name), ...field('Email', email), ...field('Position', position), h('label', { text: 'Company' }), company,
+            h('div', { class: 'row' }, h('div', {}, h('label', { text: 'Role' }), role), h('div', {}, h('label', { text: 'Status' }), status),
+                h('label', { class: 'row' }, approver, ' Can approve daily plans')),
+            h('h3', { text: 'Pay profile' }), ...field('Monthly salary', amount), ...field('Currency', currency), h('label', { text: 'Recurring allowances' }), al.node,
+            h('h3', { text: 'Bank details' }), ...BANK_FIELDS.flatMap(f => field({ method: 'Method', bankName: 'Bank', holderName: 'Account holder', accountNumber: 'Account number', iban: 'IBAN' }[f], bank[f])),
+            h('p', { class: 'small muted', text: 'Changing bank details: confirm them with the person by phone first.' }),
+            h('div', { class: 'row' }, save, h('button', { class: 'secondary', on: { click: () => editor.replaceChildren() } }, 'Close')), hist))
+        if (!isNew) salaryHistory(hist, p.id, s.salary.currency)
+    }
+
+    const rows = d.people.map(p => h('tr', { 'data-person': p.id },
+        h('td', {}, h('button', { class: 'link', on: { click: () => open(p) } }, p.state.name)), h('td', { class: 'small', text: p.state.email }),
+        h('td', { text: p.state.role }), h('td', { class: p.state.status === 'active' ? '' : 'bad', text: p.state.status }),
+        h('td', { text: p.state.canApproveDeliverables ? 'yes' : '' }), h('td', { class: 'small', text: companyName(p.state.companyId) }),
+        h('td', { class: 'mono', text: money(p.state.salary.amount, p.state.salary.currency) })))
+    body.replaceChildren(msg,
+        d.pendingBank ? alertBox('info', null, h('p', { text: `${d.pendingBank} bank details request(s) waiting: see Requests.` })) : '',
+        h('div', { class: 'panel' }, h('div', { class: 'row' }, h('h2', { text: 'People' }), h('span', { class: 'spacer' }),
+            h('button', { id: 'add-person', on: { click: () => open(null) } }, 'Add person')),
+            h('table', { id: 'people-table' }, h('thead', {}, h('tr', {}, ...['Name', 'Email', 'Role', 'Status', 'Approver', 'Company', 'Salary'].map(t => h('th', { text: t })))), h('tbody', {}, ...rows))),
+        editor)
+    if (openId) { const p = d.people.find(x => x.id === openId); if (p) open(p) }
+}
+
+const salaryHistory = async (box, personId, currency) => {
+    let rows
+    try { rows = await api('GET', `/api/owner/people/${personId}/salary-history`, { sign: true }) }
+    catch (e) { return box.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+    const form = h('div')
+    const editEntry = (e) => {
+        const s = e?.state ?? { type: 'salary_increase', title: '', effectiveDate: new Date().toISOString(), fromSalary: null, toSalary: null, currency, fromPosition: null, toPosition: null, description: null }
+        const type = h('select', { id: 'sh-type' }, ...HISTORY_TYPES.map(t => h('option', { value: t, selected: s.type === t }, t.replace(/_/g, ' '))))
+        const title = h('input', { id: 'sh-title', type: 'text', value: s.title ?? '' })
+        const date = h('input', { id: 'sh-date', type: 'date', value: (s.effectiveDate ?? '').slice(0, 10) })
+        const from = numInput('sh-from', s.fromSalary), to = numInput('sh-to', s.toSalary), cur = h('input', { id: 'sh-currency', type: 'text', value: s.currency ?? '', maxlength: 3 })
+        const desc = h('input', { id: 'sh-desc', type: 'text', value: s.description ?? '' })
+        const send = async state => {
+            const id = e?.id ?? newRecordId()
+            await act('/api/owner/people/salary-history', { action: 'history.save', changes: [{ key: `history/${id}`, state }] })
+            salaryHistory(box, personId, currency)
         }
-    }) } }, 'Verify everything')
-    body.replaceChildren(h('div', { class: 'panel' }, h('h2', { text: 'History' }),
-        h('p', { class: 'small muted', text: 'Re-checks, on this computer, every entry of your owner history: the links between entries and your signature on each one.' }), go), out, list)
+        const save = h('button', { id: 'sh-save', on: { click: () => busy(save, 'Saving…', async () => {
+            try {
+                if (!date.value) throw new Error('Choose a date')
+                await send(normalizeHistory({ ...s, employeeId: personId, type: type.value, title: title.value, description: desc.value,
+                    effectiveDate: new Date(`${date.value}T00:00:00Z`).toISOString(), fromSalary: parseAmount(from.value, 'From salary'), toSalary: parseAmount(to.value, 'To salary'), currency: cur.value.trim().toUpperCase() }))
+            } catch (err) { form.prepend(alertBox('bad', null, h('p', { text: err.message }))) }
+        }) } }, 'Save entry (signed)')
+        const del = e ? h('button', { class: 'danger', id: 'sh-delete', on: { click: () => {
+            if (del.dataset.confirm !== '1') { del.dataset.confirm = '1'; del.textContent = 'Confirm: delete entry'; return }
+            busy(del, 'Deleting…', () => send(null).catch(err => form.prepend(alertBox('bad', null, h('p', { text: err.message })))))
+        } } }, 'Delete entry') : null
+        form.replaceChildren(h('div', { class: 'panel' }, h('label', { text: 'Type' }), type, ...field('Title', title), ...field('Date', date),
+            h('div', { class: 'row' }, h('div', {}, ...field('From salary', from)), h('div', {}, ...field('To salary', to)), h('div', {}, ...field('Currency', cur))),
+            ...field('Note', desc), h('p'), h('div', { class: 'row' }, save, del)))
+    }
+    box.replaceChildren(h('h3', { text: 'Salary history' }),
+        rows.length ? h('table', {}, h('tbody', {}, ...rows.map(e => h('tr', { 'data-history': e.id }, h('td', { text: (e.state.effectiveDate ?? '').slice(0, 10) }), h('td', { text: e.state.title }),
+            h('td', { class: 'mono', text: `${money(e.state.fromSalary, e.state.currency)} → ${money(e.state.toSalary, e.state.currency)}` }),
+            h('td', {}, h('button', { class: 'link', on: { click: () => editEntry(e) } }, 'Edit')))))) : h('p', { class: 'small muted', text: 'No salary entries.' }),
+        h('button', { class: 'link', id: 'sh-add', on: { click: () => editEntry(null) } }, '+ Add salary entry'), form)
+}
+
+/* ---------------- Requests (bank details) ---------------- */
+
+const requestsTab = async (body, message = null) => {
+    body.replaceChildren(h('p', { class: 'muted', text: 'Loading requests…' }))
+    let rows
+    try { rows = await api('GET', '/api/owner/people/bank-requests', { sign: true }) }
+    catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+    const msg = h('div', { id: 'requests-result' }, message)
+    const labels = { method: 'Method', bankName: 'Bank', holderName: 'Account holder', accountNumber: 'Account number', iban: 'IBAN' }
+    const cards = rows.map(r => {
+        const approve = h('button', { 'data-approve': r.id, on: { click: () => {
+            if (approve.dataset.confirm !== '1') { approve.dataset.confirm = '1'; approve.textContent = `I called ${r.employee}: approve`; return }
+            busy(approve, 'Approving…', async () => {
+                try {
+                    const flags = await flagsFor([r.key])
+                    if (flags.length) throw new Error(`${r.employee}'s record was changed outside the Owner Console. Check Verify everything first.`)
+                    await act(`/api/owner/people/bank-requests/${r.id}`, { action: 'bank.approve', changes: [{ key: r.key, state: { ...r.state, bankDetails: r.requested } }] })
+                    requestsTab(body, alertBox('good', null, h('p', { text: `Approved: new bank details for ${r.employee}.` })))
+                } catch (e) { msg.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+            })
+        } } }, 'Approve')
+        const reject = h('button', { class: 'secondary', 'data-reject': r.id, on: { click: () => busy(reject, 'Rejecting…', async () => {
+            try { await act(`/api/owner/people/bank-requests/${r.id}`, { action: 'bank.reject' }); requestsTab(body, alertBox('good', null, h('p', { text: `Rejected the request of ${r.employee}.` }))) }
+            catch (e) { msg.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+        }) } }, 'Reject')
+        return h('div', { class: 'panel', 'data-request': r.id }, h('h3', { text: `${r.employee} asks for new bank details` }),
+            h('p', { class: 'small muted', text: `${r.email} · ${fmtDate(r.createdAt)}` }),
+            h('table', {}, h('thead', {}, h('tr', {}, h('th', { text: '' }), h('th', { text: 'Now (in use)' }), h('th', { text: 'Requested' }))),
+                h('tbody', {}, ...BANK_FIELDS.map(f => h('tr', {}, h('td', { text: labels[f] }), h('td', { class: 'mono', text: r.state?.bankDetails?.[f] ?? '' }),
+                    h('td', { class: `mono ${(r.state?.bankDetails?.[f] ?? null) !== r.requested[f] ? 'ok' : ''}`, text: r.requested[f] ?? '' }))))),
+            alertBox('info', null, h('p', { text: `Before approving, call ${r.employee} on a number you already know (not one from this request) and read the new IBAN back to them.` })),
+            h('div', { class: 'row' }, approve, reject))
+    })
+    body.replaceChildren(msg, rows.length ? h('div', {}, ...cards) : h('div', { class: 'panel' }, h('p', { class: 'muted', text: 'No requests waiting.' })))
+}
+
+/* ---------------- Verify everything (history + records) ---------------- */
+
+const summarize = records => {
+    const by = t => records.filter(r => r.key.startsWith(`${t}/`)).map(r => r.state)
+    const users = by('users'), salaries = by('salaries'), history = by('history')
+    const sumBy = (rows, val, cur) => { const t = {}; for (const r of rows) { const v = val(r); if (v) t[cur(r) ?? '?'] = round2((t[cur(r) ?? '?'] ?? 0) + v) } return Object.entries(t).map(([c, v]) => money(v, c)).join(' + ') || '0' }
+    const admins = users.filter(u => u.role === 'admin'), approvers = users.filter(u => u.canApproveDeliverables)
+    const active = users.filter(u => u.status === 'active')
+    return [
+        users.length ? `People: ${users.length} (${active.length} active, ${users.length - active.length} inactive)` : null,
+        users.length ? `Admins: ${admins.length}: ${admins.map(u => u.name).join(', ') || 'none'}` : null,
+        users.length ? `Can approve daily plans: ${approvers.length}: ${approvers.map(u => u.name).join(', ') || 'none'}` : null,
+        users.length ? `Monthly salaries of active people: ${sumBy(active, u => u.salary.amount, u => u.salary.currency)}` : null,
+        users.length ? `People with bank details: ${users.filter(u => BANK_FIELDS.some(f => u.bankDetails[f])).length}` : null,
+        salaries.length ? `Salary records: ${salaries.length} (paid ${salaries.filter(s => s.status === 'paid').length}: ${sumBy(salaries.filter(s => s.status === 'paid'), s => s.netPay, s => s.currency)}; pending ${salaries.filter(s => s.status === 'pending').length}: ${sumBy(salaries.filter(s => s.status === 'pending'), s => s.netPay, s => s.currency)})` : null,
+        history.length ? `Salary-history entries: ${history.length}` : null,
+    ].filter(Boolean)
+}
+
+const verifyTab = body => {
+    const out = h('div', { id: 'verify-result' })
+    const recOut = h('div', { id: 'records-result' })
+    const adoptBox = h('div', { id: 'adopt-box' })
+    const list = h('div')
+    const run = async () => {
+        out.replaceChildren(); recOut.replaceChildren(); adoptBox.replaceChildren(); list.replaceChildren()
+        const d = await api('GET', '/api/owner/log', { sign: true })
+        const integ = await api('GET', '/api/owner/integrity', { sign: true })
+        const pin = readPin()
+        const fp = await fingerprint(d.publicKey)
+        const problems = []
+        if (fp !== S.fingerprint) problems.push({ seq: '-', problem: `the server verifies with a different key (${fp})` })
+        const v = await verifyChain(d.entries, S.publicKey)
+        problems.push(...v.problems)
+        if (pin?.chainCount && v.count < pin.chainCount) problems.push({ seq: '-', problem: `the history is shorter than when last checked here (${pin.chainCount} entries before, ${v.count} now)` })
+        if (pin?.chainCount && pin.chainHead && v.count >= pin.chainCount) {
+            const then = d.entries.find(e => e.seq === pin.chainCount)
+            if (!then || then.hash !== pin.chainHead) problems.push({ seq: pin.chainCount, problem: 'differs from the entry this console saw before (the history was rewritten)' })
+        }
+        const r = await checkIntegrity(problems.length ? d.entries.filter(() => false) : d.entries, integ.records)
+        writePin({ verifiedAt: new Date().toISOString(), ...(problems.length ? {} : { chainCount: v.count, chainHead: v.head }) })
+        document.getElementById('last-verified')?.replaceChildren(`Verify everything: ${verifiedText()}`)
+
+        out.replaceChildren(problems.length
+            ? alertBox('bad', `✘ History: problems found (${problems.length})`, h('ul', { id: 'verify-problems' }, ...problems.map(p => h('li', { text: `Entry ${p.seq}: ${p.problem}` }))),
+                h('p', {}, 'Chain fingerprint now: ', h('span', { class: 'fp small', text: shortHash(v.head) })), h('p', { text: 'Someone changed your owner history on the server. Treat this as a security incident.' }))
+            : alertBox('good', `✔ History verified: ${v.count} entries`, h('p', {}, 'Chain fingerprint: ', h('span', { class: 'fp small', id: 'chain-fp', text: shortHash(v.head) })),
+                h('p', { class: 'small', text: 'Every link and every signature checks out with your key. Compare the chain fingerprint and the entry count with your latest daily report email.' })))
+
+        const notAdopted = Object.entries(r.notAdopted)
+        recOut.replaceChildren(problems.length
+            ? alertBox('bad', 'Records not checked', h('p', { text: 'The history itself is not trustworthy, so records cannot be checked against it.' }))
+            : r.flags.length
+                ? alertBox('bad', `✘ Records: ${r.flags.length} changed outside the Owner Console`, h('ul', { id: 'records-problems' }, ...r.flags.map(f => h('li', {},
+                    h('b', { text: f.label }), `: ${f.problem}`,
+                    f.fields?.length ? h('table', { class: 'small' }, h('tbody', {}, ...f.fields.map(x => h('tr', {}, h('td', { class: 'mono', text: x.field }),
+                        h('td', { text: `signed: ${JSON.stringify(x.signed)}` }), h('td', { class: 'bad', text: `now: ${JSON.stringify(x.now)}` }))))) : null))),
+                    h('p', { text: 'These records were changed directly in the database. Treat this as a security incident.' }))
+                : (() => {
+                    const checkedNow = r.checked - notAdopted.reduce((n, [, c]) => n + c, 0)
+                    if (!checkedNow && notAdopted.length) return alertBox('info', 'Records: not checked yet', h('p', { text: 'None of the existing records has been adopted yet. Check the summary below and adopt them; from then on every change made outside the console is flagged.' }))
+                    return alertBox('good', `✔ Records verified: ${checkedNow} owner records match their last signed state`,
+                        notAdopted.length ? h('p', { class: 'small', text: `Not adopted yet (not checked): ${notAdopted.map(([t, c]) => `${c} ${t}`).join(', ')}.` }) : null)
+                })())
+
+        if (!problems.length && notAdopted.length) {
+            const types = notAdopted.map(([t]) => t)
+            const recs = integ.records.filter(x => types.includes(x.key.split('/')[0]))
+            const go = h('button', { id: 'adopt-go', on: { click: () => {
+                if (go.dataset.confirm !== '1') { go.dataset.confirm = '1'; go.textContent = 'Confirm: these figures are right, adopt them'; return }
+                busy(go, 'Adopting…', async () => {
+                    try {
+                        const res = await act('/api/owner/adopt', { action: 'adopt', types, changes: recs.map(x => ({ key: x.key, state: x.state })) })
+                        adoptBox.replaceChildren(alertBox('good', null, h('p', { text: `Adopted ${res.records} records as entry #${res.seq}.` })))
+                        await run()
+                    } catch (e) { adoptBox.prepend(alertBox('bad', null, h('p', { text: e.message }))) }
+                })
+            } } }, 'Adopt current records')
+            adoptBox.replaceChildren(h('div', { class: 'panel' }, h('h2', { text: 'Adopt current records' }),
+                h('p', { text: `These records existed before the Owner Console took over (${notAdopted.map(([t, n]) => `${n} ${t}`).join(', ')}). Adopting signs them as they are today, as your starting point. From then on, any change made outside the console is flagged.` }),
+                h('ul', { id: 'adopt-summary' }, ...summarize(recs).map(l => h('li', { text: l }))),
+                alertBox('bad', null, h('p', { id: 'adopt-warning', text: 'Check these totals against what you know (salaries, approvers, admins). Adopting accepts today\'s database as true: anything wrong here becomes your starting point.' })),
+                go))
+        }
+
+        list.replaceChildren(h('div', { class: 'panel' }, h('h3', { text: 'History' }),
+            h('table', {}, h('thead', {}, h('tr', {}, ...['#', 'Time', 'Action', 'Record', 'Result'].map(t => h('th', { text: t })))),
+                h('tbody', {}, ...[...d.entries].reverse().slice(0, 300).map(e => h('tr', {},
+                    h('td', { class: 'mono', text: e.seq }), h('td', { text: fmtDate(e.at) }), h('td', { class: 'mono', text: e.action }),
+                    h('td', { class: 'mono small', text: e.recordId ?? '' }), h('td', { class: 'small', text: e.result ?? '' })))))))
+    }
+    const go = h('button', { id: 'verify-all', on: { click: () => busy(go, 'Verifying…', () => run().catch(e => out.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))))) } }, 'Verify everything')
+    body.replaceChildren(h('div', { class: 'panel' }, h('h2', { text: 'Verify everything' }),
+        h('p', { class: 'small muted', text: 'Re-checks, on this computer, your whole owner history (every link and your signature on each entry) and every owner-controlled record against its last signed state.' }),
+        h('p', { class: 'small', text: `Last run: ${verifiedText()}` }), go), out, recOut, adoptBox, list)
 }
 
 const settingsTab = body => {

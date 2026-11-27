@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
 import { FiPlus, FiEdit, FiTrash2, FiClock } from 'react-icons/fi'
 import Link from 'next/link'
 import { useAuth } from '@/context/AuthContext'
@@ -193,8 +194,8 @@ const Employees = () => {
     <>
       <div className='py-4 lg:py-6 flex items-center justify-between'>
         <h4 className='text-md sm:text-xl font-bold font-heading'>Employees Management</h4>
-        <ButtonEmerald icon={<FiPlus className="size-4" />} onClick={() => handleOpenModal()} />
       </div>
+      <OwnerConsoleNote className='mb-4'>Adding people and changing their details, role, status, approver rights, pay or bank details are done in the Owner Console.</OwnerConsoleNote>
 
       {missingCompany > 0 && (
         <div className='mb-4 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800'>
@@ -252,8 +253,6 @@ const Employees = () => {
                       {emp.role !== 'admin' && (
                         <Link href={`/employee-history?employee=${emp._id}`} className="text-charcoal/60 hover:text-charcoal transition" title="History"><FiClock className="size-4" /></Link>
                       )}
-                      <button onClick={() => handleOpenModal(emp)} className="text-blue-600 hover:text-blue-900 transition" title="Edit"><FiEdit className="size-4" /></button>
-                      <button onClick={() => handleDelete(emp._id)} className="text-red-600 hover:text-red-900 transition" title="Delete"><FiTrash2 className="size-4" /></button>
                     </div>
                   </td>
                 </tr>

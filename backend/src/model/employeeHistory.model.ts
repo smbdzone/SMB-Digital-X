@@ -50,6 +50,7 @@ export interface IEmployeeHistory extends Document {
 
     addedBy: Types.ObjectId
     updatedBy?: Types.ObjectId
+    ownerSeal?: { seq?: number | null; hash?: string }   // Owner Console seal (see owner/ownerState.ts)
 
     createdAt: Date
     updatedAt: Date
@@ -73,6 +74,8 @@ const employeeHistorySchema = new Schema<IEmployeeHistory>(
 
         addedBy: { type: Schema.Types.ObjectId, ref: 'users', required: true },
         updatedBy: { type: Schema.Types.ObjectId, ref: 'users' },
+        // Owner Console: the signed history entry that last set this record's protected fields, and their hash.
+        ownerSeal: { type: Schema.Types.Mixed, default: undefined },   // { seq, hash }: only set by a signed Owner Console action
     },
     { timestamps: true }
 )

@@ -11,7 +11,11 @@ import {
     appendOwnerLog, checkSignedRequest, getOwnerKey, maskEmail, ownerLogEntries, ownerLogHead, ownerReportAddress,
     rawBodyOf, sendOwnerMail, setupWindow,
 } from './owner.service.js'
-import { SignedRequest, fingerprint, importPublicKey } from './signing.js'
+import { fingerprint, importPublicKey } from './signing.js'
+import { jsonBody, owner, requireOwner } from './ownerHttp.js'
+import integrityRoutes from './integrity.routes.js'
+import payrollRoutes from './payroll.routes.js'
+import peopleRoutes from './people.routes.js'
 
 /*
  * Owner Console API (/api/owner). Called only by the Owner Console: one local HTML file on the owner's laptop,
@@ -45,21 +49,8 @@ router.use((req: Request, res: Response, next: NextFunction) => {
 })
 
 // The signature covers the exact body bytes, so the body is kept raw and parsed here (index.ts skips its JSON parser).
-router.use(express.raw({ type: () => true, limit: '64kb' }))
-const jsonBody = (req: Request): any => {
-    const raw = rawBodyOf(req)
-    if (!raw.length) return {}
-    try { return JSON.parse(raw.toString('utf8')) } catch { throw badRequest('Request body is not valid JSON') }
-}
-
-// res.locals.owner = { request, key } after a good signature
-const requireOwner = async (req: Request, res: Response, next: NextFunction) => {
-    const key = await getOwnerKey()
-    if (!key) throw unauthorized('The Owner Console is not set up')
-    res.locals.owner = { request: await checkSignedRequest(req, key.publicKey), key }
-    next()
-}
-
+// 2 MB: "Adopt current records" sends every protected record in one signed body.
+router.use(express.raw({ type: () => true, limit: '2mb' }))
 /* ------------------------------------------------------------------ */
 /* Validation                                                          */
 /* ------------------------------------------------------------------ */
@@ -200,7 +191,6 @@ router.post('/setup', rateLimit({ windowMs: 15 * 60_000, max: 10, message: 'Too 
 /* Signed                                                              */
 /* ------------------------------------------------------------------ */
 
-const owner = (res: Response) => res.locals.owner as { request: SignedRequest; key: Awaited<ReturnType<typeof getOwnerKey>> & object }
 
 // Login: proves the console holds the key by signing a one-time challenge from the server.
 router.post('/login', requireOwner, async (req, res) => {
@@ -239,36 +229,9 @@ router.get('/log', requireOwner, async (_req, res) => {
     res.json({ success: true, data: { entries: await ownerLogEntries(), publicKey: o.key.publicKey, fingerprint: o.key.fingerprint } })
 })
 
-/* ------------------------------------------------------------------ */
-/* Pilot owner action: mark a salary as paid                           */
-/* ------------------------------------------------------------------ */
-
-router.get('/salaries', requireOwner, async (req, res) => {
-    const status = req.query.status === 'paid' ? 'paid' : 'pending'
-    const rows = await Salary.find({ status }).sort({ month: -1, _id: 1 }).limit(500)
-        .populate('employeeId', 'name').populate('companyId', 'name').lean()
-    const data = rows.map((s: any) => ({
-        id: String(s._id), employee: s.employeeId?.name ?? '?', company: s.companyId?.name ?? '?',
-        month: s.month, currency: s.currency, netPay: s.netPay, status: s.status,
-    }))
-    await appendOwnerLog({ action: 'read.salaries', recordId: status, request: owner(res).request, result: { count: data.length } })
-    res.json({ success: true, data })
-})
-
-router.post('/salaries/:id/pay', requireOwner, async (req, res) => {
-    const id = String(req.params.id)
-    if (!isObjectId(id)) throw badRequest('Not a salary id')
-    const o = owner(res)
-    try {
-        const outcome = await updateSalaryRecord(id, { status: 'paid' }, { id: String(o.key.ownerUserId) })
-        const result = { ok: true, status: 'paid', slipEmail: outcome.emailOutcome?.status ?? 'not_sent' }
-        const entry = await appendOwnerLog({ action: 'salary.pay', recordId: id, request: o.request, result })
-        res.json({ success: true, data: { ...result, log: { seq: entry.seq, head: entry.hash } } })
-    } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        await appendOwnerLog({ action: 'salary.pay', recordId: id, request: o.request, result: { ok: false, error: message } })
-        throw error
-    }
-})
+// Owner actions (payroll, people, salary history, integrity, adopt) live in their own route files.
+router.use(integrityRoutes)
+router.use(payrollRoutes)
+router.use(peopleRoutes)
 
 export default router

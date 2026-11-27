@@ -1,4 +1,5 @@
 'use client';
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { FiCheckCircle, FiEdit, FiEye, FiFileText, FiMail, FiPlay } from 'react-icons/fi';
@@ -322,20 +323,8 @@ const SalaryManagement = () => {
                 </div>
             </div>
 
-            {/* Actions */}
-            <div className="mb-5 flex flex-wrap gap-3">
-                <button
-                    type="button"
-                    onClick={handleGenerate}
-                    disabled={busy}
-                    className="inline-flex h-11 items-center gap-2 rounded-xl border border-charcoal/10 bg-white px-4 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03] disabled:opacity-50"
-                >
-                    <FiPlay className="size-4" /> Generate {formatMonthLabel(month)}
-                </button>
-                <ButtonEmerald icon={<FiCheckCircle className="size-4" />} onClick={handleBulkPay} disabled={busy || !hasPending} className="!h-11">
-                    Pay all pending
-                </ButtonEmerald>
-            </div>
+            {/* Owner actions (generate, edit, pay, resend) are done in the Owner Console. */}
+            <OwnerConsoleNote className="mb-5">Running payroll, editing salaries, paying and resending slips are done in the Owner Console.</OwnerConsoleNote>
 
             {/* Summary (per currency, from the backend so it covers every page) */}
             <div className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -403,13 +392,6 @@ const SalaryManagement = () => {
                                             <div className="flex items-center gap-1">
                                                 <button onClick={() => setViewSalary(salary)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title="View"><FiEye className="size-4" /></button>
                                                 <button onClick={() => setPdfSalary(salary)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title={salary.status === 'paid' ? 'Slip PDF' : 'Slip PDF (draft)'} aria-label="Slip PDF"><FiFileText className="size-4" /></button>
-                                                <button onClick={() => openEdit(salary)} className="rounded-lg p-2 text-blue-600 transition hover:bg-blue-50" title={salary.status === 'paid' ? 'Edit notes' : 'Edit'}><FiEdit className="size-4" /></button>
-                                                {salary.status === 'pending' && (
-                                                    <button onClick={() => openPay(salary)} disabled={rowBusy} className="rounded-lg p-2 text-emerald-700 transition hover:bg-emerald-50 disabled:opacity-40" title="Mark as paid"><FiCheckCircle className="size-4" /></button>
-                                                )}
-                                                {salary.status === 'paid' && salary.email?.status !== 'sent' && (
-                                                    <button onClick={() => handleResend(salary)} disabled={rowBusy} className="rounded-lg p-2 text-amber-600 transition hover:bg-amber-50 disabled:opacity-40" title="Resend slip email"><FiMail className="size-4" /></button>
-                                                )}
                                             </div>
                                         </td>
                                     </tr>

@@ -219,7 +219,7 @@ const EmployeeHistoryTimeline = ({ employeeId, mine = false, canEdit = false }: 
                                             {addedBy && <p className="mt-2 text-xs text-charcoal/40">Added by {addedBy}</p>}
                                         </div>
 
-                                        {canEdit && (
+                                        {canEdit && !hasSalary && (
                                             <div className="flex shrink-0 items-center gap-3">
                                                 <button onClick={() => openEdit(entry)} className="text-blue-600 transition hover:text-blue-800" title="Edit"><FiEdit className="size-4" /></button>
                                                 <button onClick={() => handleDelete(entry)} disabled={deletingId === entry._id} className="text-red-500 transition hover:text-red-700 disabled:opacity-50" title="Delete"><FiTrash2 className="size-4" /></button>

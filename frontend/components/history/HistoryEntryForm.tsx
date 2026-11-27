@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useEffect, useState } from 'react'
+import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import {
@@ -112,9 +113,6 @@ const HistoryEntryForm = ({ open, onClose, employeeId, entry, onSaved }: Props) 
         if (form.currency.trim() && !/^[A-Za-z]{3}$/.test(form.currency.trim())) {
             return toast.showError('Currency must be a 3-letter code, for example AED')
         }
-        if (!isEdit && form.applyToProfile && !form.toPosition.trim() && form.toSalary === '') {
-            return toast.showError('To update the profile, enter a new position and/or a new salary')
-        }
 
         const payload: HistoryPayload = {
             type: form.type,
@@ -132,11 +130,7 @@ const HistoryEntryForm = ({ open, onClose, employeeId, entry, onSaved }: Props) 
             if (form.description.trim()) payload.description = form.description.trim()
             if (form.fromPosition.trim()) payload.fromPosition = form.fromPosition.trim()
             if (form.toPosition.trim()) payload.toPosition = form.toPosition.trim()
-            if (form.applyToProfile) payload.applyToProfile = true
         }
-        if (form.fromSalary !== '') payload.fromSalary = Number(form.fromSalary)
-        if (form.toSalary !== '') payload.toSalary = Number(form.toSalary)
-        if (form.currency.trim()) payload.currency = form.currency.trim().toUpperCase()
 
         setSaving(true)
         try {
@@ -189,47 +183,22 @@ const HistoryEntryForm = ({ open, onClose, employeeId, entry, onSaved }: Props) 
             </div>
 
             <div className="mt-6 border-t border-charcoal/5 pt-5">
-                <h5 className="text-sm font-semibold text-charcoal">Position and salary change</h5>
+                <h5 className="text-sm font-semibold text-charcoal">Position change</h5>
                 <p className="mt-0.5 text-xs text-charcoal/50">
-                    Optional. {isEdit ? '' : 'If you leave the "From" values blank and update the profile below, the current profile values are used.'}
+                    Optional. A record only: the person&apos;s current position is changed in the Owner Console.
                 </p>
                 <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
                     <Input label="From position" name="fromPosition" value={form.fromPosition} handleChange={handleChange} maxLength={100} placeholder="Intern" />
                     <Input label="To position" name="toPosition" value={form.toPosition} handleChange={handleChange} maxLength={100} placeholder="Junior Developer" />
-                    <Input label="From salary" name="fromSalary" type="number" min={0} value={form.fromSalary} handleChange={handleChange} placeholder="2000" />
-                    <Input label="To salary" name="toSalary" type="number" min={0} value={form.toSalary} handleChange={handleChange} placeholder="4500" />
-                    <Input
-                        label="Currency"
-                        name="currency"
-                        maxLength={3}
-                        value={form.currency}
-                        handleChange={e => setForm(p => ({ ...p, currency: e.target.value.toUpperCase() }))}
-                        placeholder="AED"
-                    />
                 </div>
+                <OwnerConsoleNote className="mt-4">Salary changes (entries with salary figures) are recorded in the Owner Console.</OwnerConsoleNote>
             </div>
 
             {isEdit ? (
                 <div className="mt-6 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
                     Editing changes this record only. The employee&apos;s current position and salary are not changed.
                 </div>
-            ) : (
-                <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-xl border border-charcoal/10 bg-charcoal/[0.02] p-4">
-                    <input
-                        type="checkbox"
-                        checked={form.applyToProfile}
-                        onChange={e => setForm(p => ({ ...p, applyToProfile: e.target.checked }))}
-                        className="mt-0.5 size-4 accent-blue-600"
-                    />
-                    <span className="text-sm">
-                        <span className="block font-medium text-charcoal">Also update the employee&apos;s profile</span>
-                        <span className="mt-0.5 block text-xs text-charcoal/50">
-                            Sets the current position and/or salary from the &quot;To&quot; values. The old salary is kept in salary history.
-                            Leave this off to only record the event.
-                        </span>
-                    </span>
-                </label>
-            )}
+            ) : null}
 
             <div className="mt-6 flex justify-end gap-3">
                 <button type="button" onClick={onClose} className="rounded-xl border border-charcoal/10 px-4 py-2.5 text-sm font-semibold text-charcoal transition hover:bg-charcoal/[0.03]">Cancel</button>

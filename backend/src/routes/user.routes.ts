@@ -1,15 +1,14 @@
 import express from "express";
-import { changePasswordController, deleteUserController, getAllUserController, getUserController, loginController, registerController, updateController } from "../controller/user.controller.js";
+import { changePasswordController, getAllUserController, getMyBankDetails, getUserController, loginController, requestBankDetailsChange, updateController } from "../controller/user.controller.js";
+import { ownerConsoleOnly } from "../middlewares/ownerConsoleOnly.js";
 import { isAllow, isVerified } from "../middlewares/isVerified.js";
 import { forgotPasswordController, resetPasswordController, verifyResetCodeController } from "../controller/passwordReset.controller.js";
 import { failedAttemptLimit, rateLimit } from "../middlewares/rateLimit.js";
 
 const route = express.Router()
 
-// Creating an employee sets their salary and company, so it is admin-only.
-// (It used to be public: anyone could register themselves with any salary.)
-// To create your very first admin, insert it directly in MongoDB or use a one-off seed script.
-route.post('/register', isVerified, isAllow(['admin']), registerController)
+// New people are added in the Owner Console (signed and recorded). Refused here for everyone.
+route.post('/register', ownerConsoleOnly)
 
 // Forgot password (public). Limits are counted per email address.
 const FIFTEEN_MIN = 15 * 60 * 1000
@@ -21,10 +20,13 @@ route.post('/reset-password', rateLimit({ windowMs: FIFTEEN_MIN, max: 15, messag
 
 // Signed in, own account: needs the current password. Limited per IP like the reset endpoints.
 route.post('/change-password', isVerified, rateLimit({ windowMs: FIFTEEN_MIN, max: 10, message: 'Too many attempts. Please try again in a few minutes.' }), changePasswordController)
+// Employees ask for new bank details; the owner approves them in the Owner Console.
+route.get('/bank-details', isVerified, getMyBankDetails)
+route.post('/bank-details/request', isVerified, rateLimit({ windowMs: FIFTEEN_MIN, max: 5, message: 'Too many requests. Please try again later.' }), requestBankDetailsChange)
 route.patch('/update/:id', isVerified, isAllow(['admin', 'employee']), updateController)
 route.get('/user', isVerified, isAllow(['admin', 'employee']), getUserController)
 route.get('/all-user', isVerified, isAllow(['admin', 'employee']), getAllUserController)
-route.delete('/delete-user/:id', isVerified, isAllow(['admin']), deleteUserController)
+// No delete: people are deactivated in the Owner Console, so their salary and letter history stays.
 
 
 export default route

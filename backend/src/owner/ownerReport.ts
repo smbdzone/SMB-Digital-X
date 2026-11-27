@@ -1,6 +1,8 @@
 import mongoose, { Schema } from 'mongoose'
 import { getOwnerKey, ownerLogEntries, ownerReportAddress, sendOwnerMail } from './owner.service.js'
 import { GENESIS, OwnerLogEntryData, shortHash, verifyChain } from './signing.js'
+import { checkIntegrity } from './ownerState.js'
+import { currentRecords } from './ownerRecords.js'
 
 /*
  * Daily report to the owner's private email (OWNER_REPORT_EMAIL): yesterday's owner actions (Asia/Dubai days),
@@ -49,6 +51,8 @@ export interface OwnerReportResult {
     day: string
     actions?: number
     chainOk?: boolean
+    recordsOk?: boolean
+    flags?: number
     count?: number
     chainFingerprint?: string
 }
@@ -69,6 +73,8 @@ export const sendDailyOwnerReport = async (now = new Date()): Promise<OwnerRepor
     try {
         const entries = await ownerLogEntries()
         const check = await verifyChain(entries, key.publicKey)
+        const integrity = checkIntegrity(entries, await currentRecords())
+        const notAdopted = Object.entries(integrity.notAdopted).map(([t, n]) => `${n} ${t}`).join(', ')
         const head = entries.length ? check.head : GENESIS
         const yesterday = entries.filter(e => { const t = new Date(e.at).getTime(); return t >= start.getTime() && t < end.getTime() })
 
@@ -79,6 +85,13 @@ export const sendDailyOwnerReport = async (now = new Date()): Promise<OwnerRepor
             ...check.problems.slice(0, 20).map(p => `  - entry #${p.seq}: ${p.problem}`),
             ...(check.problems.length > 20 ? [`  ... and ${check.problems.length - 20} more`] : []),
             '',
+            integrity.ok
+                ? `Records check: PASSED (${integrity.checked - Object.values(integrity.notAdopted).reduce((a, b) => a + b, 0)} owner-controlled records match their last signed state)`
+                : `Records check: FAILED. ${integrity.flags.length} record(s) were changed outside the Owner Console:`,
+            ...integrity.flags.slice(0, 20).map(f => `  - ${f.label}: ${f.problem}${f.fields?.length ? ` (${f.fields.map(x => `${x.field}: signed ${JSON.stringify(x.signed)}, now ${JSON.stringify(x.now)}`).join('; ')})` : ''}`),
+            ...(integrity.flags.length > 20 ? [`  ... and ${integrity.flags.length - 20} more`] : []),
+            ...(notAdopted ? [`Not adopted yet (not checked): ${notAdopted}. Use "Adopt current records" in the console.`] : []),
+            '',
             `Chain fingerprint: ${shortHash(head)}   (entries: ${check.count})`,
             `Key fingerprint:   ${key.fingerprint}`,
             '',
@@ -88,9 +101,9 @@ export const sendDailyOwnerReport = async (now = new Date()): Promise<OwnerRepor
             'Compare the chain fingerprint and entry count with "Verify everything" in your Owner Console.',
             'Keep these emails: an older report that no longer matches means the history was rewritten.',
         ]
-        await sendOwnerMail(`Owner Console daily report ${day}${check.ok ? '' : ' - CHECK FAILED'}`, lines)
+        await sendOwnerMail(`Owner Console daily report ${day}${check.ok && integrity.ok ? '' : ' - CHECK FAILED'}`, lines)
         await OwnerReport.updateOne({ _id: day }, { $set: { sentAt: new Date(), chainOk: check.ok, count: check.count, head } })
-        return { sent: true, day, actions: yesterday.length, chainOk: check.ok, count: check.count, chainFingerprint: shortHash(head) }
+        return { sent: true, day, actions: yesterday.length, chainOk: check.ok, recordsOk: integrity.ok, flags: integrity.flags.length, count: check.count, chainFingerprint: shortHash(head) }
     } catch (error) {
         await OwnerReport.deleteOne({ _id: day, sentAt: { $exists: false } })   // let the next run try again
         throw error

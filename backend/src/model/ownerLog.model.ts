@@ -21,6 +21,7 @@ const ownerLogSchema = new Schema<OwnerLogEntryData>({
         sig: { type: String, required: true },
     },
     result: { type: String, default: null },        // JSON text written by the server (a claim, not signed)
+    body: { type: String, default: null },          // the exact signed request body of a state-changing action (its hash is signed)
     prevHash: { type: String, required: true },
     hash: { type: String, required: true },
 }, { versionKey: false, collection: 'ownerlogs' })

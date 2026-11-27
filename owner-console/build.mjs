@@ -26,11 +26,12 @@ const common = read('data/common-phrases.txt').split('\n').map(l => l.trim()).fi
 
 // crypto.js is an ES module (the tests import it); inside the page it becomes plain code in one scope.
 const cryptoCode = read('crypto.js').replace(/^export /gm, '')
-// integrity.js imports from crypto.js (for the tests); in the page both share one scope.
+// vault.js and integrity.js import from crypto.js (for the tests); in the page they all share one scope.
+const vaultCode = read('vault.js').replace(/^import .*$/gm, '').replace(/^export /gm, '')
 const integrityCode = read('integrity.js').replace(/^import .*$/gm, '').replace(/^export /gm, '')
 const signatureCode = read('signature.js').replace(/^export /gm, '')
 const BUILD = { api, version, words, common }
-const script = `(() => {\n'use strict';\nconst BUILD = ${JSON.stringify(BUILD)};\n${cryptoCode}\n${integrityCode}\n${signatureCode}\n${read('screens.js')}\n${read('app.js')}\n})();\n`
+const script = `(() => {\n'use strict';\nconst BUILD = ${JSON.stringify(BUILD)};\n${cryptoCode}\n${vaultCode}\n${integrityCode}\n${signatureCode}\n${read('screens.js')}\n${read('app.js')}\n})();\n`
 const style = read('style.css')
 if (/<\/(script|style)/i.test(script + style)) throw new Error('Inline code must not contain a closing script/style tag')
 

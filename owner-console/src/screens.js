@@ -1,8 +1,9 @@
 /*
- * Owner Console v1.2.0 screens: Companies, Projects (budgets and milestone payments), Expenses and Letters.
- * Built into the same page as app.js (helpers such as h, api, act, field and alertBox come from there).
+ * Owner Console screens: Companies, Projects (budgets and milestone payments), Finance, Lock existing data (v1.3.0),
+ * Expenses and Letters. Built into the same page as app.js (helpers such as h, api, act, field and alertBox come from
+ * there; S is the console state).
  */
-/* global h, api, act, field, alertBox, busy, money, numInput, parseAmount, fmtDate, flagsFor, staleVerifyNote */
+/* global S, h, api, act, field, alertBox, busy, money, numInput, parseAmount, fmtDate, flagsFor, staleVerifyNote, txt, writePin, dubaiMonth */
 
 const LETTERHEADS = [['', 'Default (from the code)'], ['axis-aura', 'Axis Aura'], ['smb-proptech', 'SMB Axis Proptech'], ['smb-digitalzone', 'SMB DigitalZone'], ['plain', 'Plain']]
 const isoDay = v => (v ? new Date(`${v}T00:00:00.000Z`).toISOString() : null)
@@ -82,56 +83,306 @@ const companiesTab = async (body, message = null, openId = null) => {
 
 /* ---------------- Projects: budgets and milestone payments ---------------- */
 
+/*
+ * Phase 2: once locking has started, the budget and each milestone's percentage and amount are stored locked. They are
+ * unlocked here for showing and editing, checked here (the server cannot read them any more), and locked again before
+ * signing. A value that does not unlock was changed or moved outside the console: it is shown as such, not edited.
+ */
+const openState = async (key, state) => { try { return { plain: await unlockState(S.vaultKey, key, state) } } catch { return { plain: null, broken: true } } }
+/** Projects from GET /api/owner/projects with their amounts unlocked: { ...p, plain, broken, milestones: [{ ...m, plain, broken }] }. */
+const openProjects = async rows => Promise.all(rows.map(async p => ({
+    ...p, ...(await openState(p.key, p.state)),
+    milestones: await Promise.all(p.milestones.map(async m => ({ ...m, ...(await openState(m.key, m.state)) }))),
+})))
+/** Locks the amounts of a state before signing, once locking has started (before that: plain, as before). */
+const sealAmounts = (key, state) => (S.lockingStarted ? lockState(S.vaultKey, key, state) : state)
+const BROKEN = 'Does not unlock: changed or moved outside the Owner Console. Run Verify everything.'
+
 const projectsTab = async (body, message = null) => {
     body.replaceChildren(h('p', { class: 'muted', text: 'Loading projects…' }))
     let rows
-    try { rows = await api('GET', '/api/owner/projects', { sign: true }) } catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+    try { rows = await openProjects(await api('GET', '/api/owner/projects', { sign: true })) } catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
     const msg = h('div', { id: 'projects-result' }, message)
     const reload = text => projectsTab(body, alertBox('good', null, h('p', { text })))
     const fail = e => say(msg, 'bad', e.message)
     const cards = rows.map(p => {
-        const budget = numInput(`budget-${p.id}`, p.state.budget)
-        const setBudget = h('button', { 'data-budget': p.id, on: { click: () => busy(setBudget, 'Saving…', async () => {
-            try { const b = parseAmount(budget.value, 'Budget') ?? 0; await act('/api/owner/projects/budget', { action: 'project.budget', changes: [{ key: p.key, state: normalizeProject({ budget: b }) }] }); reload(`Budget of ${p.name}: ${money(b, 'AED')}.`) } catch (e) { fail(e) }
+        const anyBroken = p.broken || p.milestones.some(m => m.broken)
+        const budget = numInput(`budget-${p.id}`, p.plain?.budget, { disabled: anyBroken })
+        const setBudget = h('button', { 'data-budget': p.id, disabled: anyBroken, on: { click: () => busy(setBudget, 'Saving…', async () => {
+            try {
+                const b = parseAmount(budget.value, 'Budget') ?? 0
+                checkBudget(b, p.milestones.map(m => m.plain))
+                const state = await sealAmounts(p.key, normalizeProject({ budget: b }))
+                await act('/api/owner/projects/budget', { action: 'project.budget', changes: [{ key: p.key, state }] })
+                reload(`Budget of ${p.name}: ${money(b, BUDGET_CURRENCY)}.`)
+            } catch (e) { fail(e) }
         }) } }, 'Set budget (signed)')
         const del = twoStep(h('button', { class: 'danger', 'data-delete-project': p.id }, 'Delete project'), `Confirm: delete ${p.name} and its ${p.milestones.length} milestone(s)`, async () => {
             try { await act('/api/owner/projects/delete', { action: 'project.delete', changes: [{ key: p.key, state: null }, ...p.milestones.map(m => ({ key: m.key, state: null }))] }); reload(`Deleted ${p.name}.`) } catch (e) { fail(e) }
         })
         const msRows = p.milestones.map(m => {
-            const s = m.state
-            const mode = select(`ms-mode-${m.id}`, [['percentage', '% of budget'], ['amount', 'Amount']], s.paymentMode)
-            const value = numInput(`ms-value-${m.id}`, s.paymentMode === 'amount' ? s.paymentAmount : s.paymentPercentage)
-            const cur = inputT(`ms-cur-${m.id}`, s.currency, { maxlength: 3, size: 3 })
-            const status = select(`ms-status-${m.id}`, [['unpaid', 'unpaid'], ['invoiced', 'invoiced'], ['paid', 'paid']], s.paymentStatus)
-            const inv = h('input', { type: 'date', id: `ms-inv-${m.id}`, value: dayOf(s.invoicedAt) }), paid = h('input', { type: 'date', id: `ms-paid-${m.id}`, value: dayOf(s.paidAt) })
-            const save = h('button', { 'data-ms-save': m.id, on: { click: () => busy(save, 'Saving…', async () => {
+            const s = m.plain ?? m.state
+            const mode = select(`ms-mode-${m.id}`, [['percentage', '% of budget'], ['amount', 'Amount']], s.paymentMode, { disabled: anyBroken })
+            const value = numInput(`ms-value-${m.id}`, m.broken ? '' : s.paymentMode === 'amount' ? s.paymentAmount : s.paymentPercentage, { disabled: anyBroken })
+            const cur = inputT(`ms-cur-${m.id}`, s.currency, { maxlength: 3, size: 3, disabled: anyBroken })
+            const status = select(`ms-status-${m.id}`, [['unpaid', 'unpaid'], ['invoiced', 'invoiced'], ['paid', 'paid']], s.paymentStatus, { disabled: anyBroken })
+            const inv = h('input', { type: 'date', id: `ms-inv-${m.id}`, value: dayOf(s.invoicedAt), disabled: anyBroken }), paid = h('input', { type: 'date', id: `ms-paid-${m.id}`, value: dayOf(s.paidAt), disabled: anyBroken })
+            const save = h('button', { 'data-ms-save': m.id, disabled: anyBroken, on: { click: () => busy(save, 'Saving…', async () => {
                 try {
-                    const v = parseAmount(value.value, 'Payment') ?? 0, b = p.state.budget
+                    const v = parseAmount(value.value, 'Payment') ?? 0, b = p.plain.budget
                     const st = status.value
-                    const state = normalizeMilestone({
+                    const plain = normalizeMilestone({
                         projectId: p.id, paymentMode: mode.value, currency: cur.value.trim().toUpperCase(), paymentStatus: st,
                         paymentPercentage: mode.value === 'percentage' ? v : (b > 0 ? round2(v / b * 100) : 0),
                         paymentAmount: mode.value === 'percentage' ? round2(b * v / 100) : v,
                         invoicedAt: st === 'unpaid' ? null : isoDay(inv.value || paid.value || new Date().toISOString().slice(0, 10)),
                         paidAt: st === 'paid' ? isoDay(paid.value || new Date().toISOString().slice(0, 10)) : null,
                     })
-                    await act('/api/owner/milestones/payment', { action: 'milestone.payment', changes: [{ key: m.key, state }] })
-                    reload(`Milestone "${m.title}": ${money(state.paymentAmount, state.currency)}, ${st}.`)
+                    checkMilestonePayment(plain, b, p.milestones.filter(o => o.id !== m.id).map(o => o.plain))
+                    await act('/api/owner/milestones/payment', { action: 'milestone.payment', changes: [{ key: m.key, state: await sealAmounts(m.key, plain) }] })
+                    reload(`Milestone "${m.title}": ${money(plain.paymentAmount, plain.currency)}, ${st}.`)
                 } catch (e) { fail(e) }
             }) } }, 'Save (signed)')
             const mdel = twoStep(h('button', { class: 'secondary', 'data-ms-delete': m.id }, 'Delete'), 'Confirm: delete', async () => {
                 try { await act('/api/owner/milestones/delete', { action: 'milestone.delete', changes: [{ key: m.key, state: null }] }); reload(`Deleted milestone "${m.title}".`) } catch (e) { fail(e) }
             })
             return h('tr', { 'data-milestone': m.id }, h('td', { text: m.title }), h('td', {}, mode), h('td', {}, value), h('td', {}, cur), h('td', {}, status),
-                h('td', {}, inv), h('td', {}, paid), h('td', { class: 'mono small', text: money(s.paymentAmount, s.currency) }), h('td', {}, h('div', { class: 'row' }, save, mdel)))
+                h('td', {}, inv), h('td', {}, paid), h('td', { class: m.broken ? 'bad small' : 'mono small', text: m.broken ? BROKEN : money(s.paymentAmount, s.currency) }), h('td', {}, h('div', { class: 'row' }, save, mdel)))
         })
         return h('div', { class: 'panel', 'data-project': p.id }, h('div', { class: 'row' }, h('h3', { text: `${p.name}` }), h('span', { class: 'small muted', text: `${p.clientName} · ${p.status}` }), h('span', { class: 'spacer' }), del),
+            p.broken ? alertBox('bad', null, h('p', { class: 'project-broken', text: `Budget: ${BROKEN}` })) : null,
             h('div', { class: 'row' }, h('label', { text: 'Budget' }), budget, setBudget),
             p.milestones.length ? h('table', {}, h('thead', {}, h('tr', {}, ...['Milestone', 'Enter as', 'Value', 'Cur.', 'Payment', 'Invoiced', 'Paid', 'Amount', ''].map(t => h('th', { text: t })))), h('tbody', {}, ...msRows))
                 : h('p', { class: 'small muted', text: 'No milestones (they are added on the website).' }))
     })
     body.replaceChildren(msg, h('div', { class: 'panel' }, h('h2', { text: 'Projects: budgets and milestone payments' }),
-        h('p', { class: 'small muted', text: 'Everything without money (names, dates, team, work status) is managed on the website.' })), ...cards)
+        h('p', { class: 'small muted', text: S.lockingStarted
+            ? 'Amounts are stored locked: only this console can read them. Everything without money (names, dates, team, work status) is managed on the website.'
+            : 'Everything without money (names, dates, team, work status) is managed on the website.' })), ...cards)
+}
+
+/* ---------------- Finance (Phase 2): the figures the website dashboard used to show ---------------- */
+
+const totalsText = t => Object.entries(t).map(([c, v]) => money(v, c)).join(' + ') || money(0, BUDGET_CURRENCY)
+
+const financeTab = async body => {
+    body.replaceChildren(h('p', { class: 'muted', text: 'Loading and unlocking…' }))
+    let rows, integ
+    try {
+        ;[rows, integ] = await Promise.all([api('GET', '/api/owner/projects', { sign: true }), api('GET', '/api/owner/integrity', { sign: true })])
+        rows = await openProjects(rows)
+    } catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+    const broken = rows.flatMap(p => [...(p.broken ? [`${p.name}: budget`] : []), ...p.milestones.filter(m => m.broken).map(m => `${p.name} / ${m.title}`)])
+    const usable = rows.filter(p => !p.broken).map(p => ({ id: p.id, name: p.name, budget: p.plain.budget, milestones: p.milestones.filter(m => !m.broken).map(m => m.plain) }))
+    const expenses = integ.records.filter(r => r.key.startsWith('expenses/')).map(r => r.state)
+    const t = financeTotals(usable, expenses, dubaiMonth())
+    const card = (id, title, value, note) => h('div', { class: 'panel', id }, h('p', { class: 'small muted', text: title }), h('h2', { text: value }), note ? h('p', { class: 'small muted', text: note }) : null)
+    body.replaceChildren(
+        broken.length ? alertBox('bad', 'Some amounts do not unlock', h('p', { text: `${broken.join(', ')}. They were changed or moved outside the Owner Console and are left out of the totals. Run Verify everything.` })) : null,
+        h('div', { class: 'cards' },
+            card('fin-total-expenses', 'Total expenses (approved and reimbursed)', totalsText(t.spent), `This month: ${totalsText(t.thisMonth)}`),
+            card('fin-remaining', 'Remaining budget', money(t.remainingBudget, BUDGET_CURRENCY), `of ${money(t.totalBudget, BUDGET_CURRENCY)} total budget, less ${BUDGET_CURRENCY} expenses`),
+            card('fin-milestones', 'Milestone payments', `${money(t.milestones.paid, null)} paid`, `Invoiced ${money(t.milestones.invoiced, null)} · planned ${money(t.milestones.allocated, null)}`),
+            card('fin-pending', 'Expenses waiting for approval', totalsText(t.pending))),
+        h('p', { class: 'small muted', text: `Projects have no currency of their own: budgets count as ${BUDGET_CURRENCY}, and only ${BUDGET_CURRENCY} expenses are subtracted from them. Other currencies are shown separately, never mixed. Milestone amounts are in each milestone's currency.` }),
+        h('div', { class: 'panel' }, h('h2', { text: 'Projects: spend against budget' }),
+            h('table', { id: 'finance-table' }, h('thead', {}, h('tr', {}, ...['Project', 'Budget', 'Allocated', 'Paid', 'Invoiced', 'Not invoiced', 'Unallocated', 'Spent', 'Remaining'].map(x => h('th', { text: x })))),
+                h('tbody', {}, ...t.perProject.map(p => h('tr', { 'data-finance-project': p.id },
+                    h('td', { text: p.name }), h('td', { class: 'mono', text: money(p.budget, BUDGET_CURRENCY) }), h('td', { class: 'mono', text: `${money(p.allocated, null)} (${p.allocatedPercent}%)` }),
+                    h('td', { class: 'mono', text: money(p.paid, null) }), h('td', { class: 'mono', text: money(p.invoiced, null) }), h('td', { class: 'mono', text: money(p.notInvoiced, null) }),
+                    h('td', { class: 'mono', text: money(p.unallocated, null) }), h('td', { class: 'mono', text: totalsText(p.spent) }),
+                    h('td', { class: p.remaining < 0 ? 'mono bad' : 'mono', text: money(p.remaining, BUDGET_CURRENCY) })))))))
+}
+
+/* ---------------- Lock existing data (Phase 2, one time) ---------------- */
+
+/** The totals compared before and after locking: { projects, milestones, totalBudget, allocated, paid, invoiced }. */
+const lockTotals = async () => {
+    const rows = await openProjects(await api('GET', '/api/owner/projects', { sign: true }))
+    const broken = rows.some(p => p.broken || p.milestones.some(m => m.broken))
+    const t = financeTotals(rows.filter(p => !p.broken).map(p => ({ id: p.id, name: p.name, budget: p.plain.budget, milestones: p.milestones.filter(m => !m.broken).map(m => m.plain) })), [], '')
+    return { rows, broken, totals: { projects: rows.length, milestones: rows.reduce((n, p) => n + p.milestones.length, 0), totalBudget: t.totalBudget, allocated: t.milestones.allocated, paid: t.milestones.paid, invoiced: t.milestones.invoiced } }
+}
+const totalsList = t => h('ul', { class: 'totals' },
+    h('li', { text: `Projects: ${t.projects}, total budget ${money(t.totalBudget, BUDGET_CURRENCY)}` }),
+    h('li', { text: `Milestones: ${t.milestones}, planned payments ${money(t.allocated, null)}, paid ${money(t.paid, null)}, invoiced ${money(t.invoiced, null)}` }))
+const sameTotals = (a, b) => canonicalJson(a) === canonicalJson(b)
+
+/** Plain history bodies still to move: entries whose stored body is plain, matches its signed hash, and is not a move batch. */
+const plainHistory = async entries => {
+    const out = []
+    for (const e of entries) {
+        if (!e.body || e.action === 'vault.history' || isLocked(e.body) || outerBodyOf(e.body)) continue
+        if ((await sha256Hex(e.body)) !== e.request.bodyHash) throw new Error(`History entry #${e.seq}: its stored body does not match its signature. Run Verify everything.`)
+        out.push(e)
+    }
+    return out
+}
+
+const lockTab = async (body, message = null) => {
+    body.replaceChildren(h('p', { class: 'muted', text: 'Loading…' }))
+    let st
+    try { st = await api('GET', '/api/owner/vault/status', { sign: true }) } catch (e) { return body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+    if (st.started && !S.lockingStarted) { S.lockingStarted = true; writePin({ lockingStarted: true }) }
+    S.lockingFinished = st.finished
+    const msg = h('div', { id: 'lock-result' }, message)
+    if (st.finished) return lockDone(body, msg, st)
+    if (st.started) return lockRun(body, msg, st)
+    return lockRecoveryCheck(body, msg)
+}
+
+// Screen 1: the recovery key. After locking, losing both the passphrase and the recovery key loses the figures for good.
+const lockRecoveryCheck = (body, msg) => {
+    const rec = txt('lock-recovery', { autofocus: true, placeholder: 'XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX' })
+    const go = h('button', { id: 'lock-recovery-go', on: { click: () => busy(go, 'Checking…', async () => {
+        try {
+            const d = await api('GET', '/api/owner/keys')
+            let bytes
+            try { bytes = parseRecoveryKey(rec.value) } catch (e) { throw new Error(e.message) }
+            const ex = await unlockKeys(await kekFromRecovery(bytes, fromB64(d.recoverySalt)), d.byRecovery).catch(() => { throw new Error('That recovery key does not unlock your keys. Locking cannot start: find the right recovery sheet first.') })
+            wipe(bytes)
+            // It must open the SAME vault key this console uses: lock a test value with one, unlock it with the other.
+            const place = { collection: 'test', id: 'recovery-check', field: 'value' }
+            const probe = toHex(randomBytes(8))
+            const same = await unlockValue(S.vaultKey, place, await lockValue(ex.vaultKey, place, probe)).then(v => v === probe).catch(() => false)
+            if (!same) throw new Error('This recovery key opens a different vault key. Locking cannot start. Stop and check your keys.')
+            rec.value = ''
+            lockSummary(body, msg)
+        } catch (e) { say(msg, 'bad', e.message) }
+    }) } }, 'Check the recovery key')
+    body.replaceChildren(h('h2', { text: 'Lock existing data' }),
+        h('div', { class: 'panel', id: 'lock-step-recovery' },
+            h('h3', { text: 'Have your printed recovery sheet ready' }),
+            h('p', { text: 'Locking stores project budgets, milestone payments and every owner history body so that only this console can read them. They can be unlocked only with your passphrase or your recovery key. If both are ever lost, the locked figures are lost for good: nobody can recover them, not even the developers.' }),
+            h('p', { text: 'Type the recovery key from your printed sheet to prove it still works. Locking does not start unless it does.' }),
+            ...field('Recovery key', rec), h('p'), msg, go))
+}
+
+// Screen 2: the summary and the start.
+const lockSummary = async (body, msg) => {
+    body.replaceChildren(h('p', { class: 'muted', text: 'Checking the history and the records…' }))
+    try {
+        const [log, integ] = await Promise.all([api('GET', '/api/owner/log', { sign: true }), api('GET', '/api/owner/integrity', { sign: true })])
+        const chain = await verifyChain(log.entries, S.publicKey)
+        const check = await checkIntegrity(log.entries, integ.records, undefined, S.vaultKey)
+        // Every type that has records must be adopted (a type with no records yet has nothing to adopt).
+        const missing = Object.keys(check.notAdopted)
+        if (!chain.ok || !check.ok || missing.length) {
+            return body.replaceChildren(h('h2', { text: 'Lock existing data' }), alertBox('bad', 'Not ready to lock', h('p', { text: !chain.ok
+                ? 'The owner history does not verify. Run Verify everything.'
+                : missing.length ? `Adopt the existing records first, in Verify everything (not adopted yet: ${missing.join(', ')}).`
+                    : `The records check found ${check.flags.length + (check.bodyProblems?.length ?? 0)} problem(s). Run Verify everything and resolve them first: locking re-signs every amount as it is now.` })))
+        }
+        const { totals, rows } = await lockTotals()
+        const plainRecords = rows.filter(p => stateHasPlainMoney('projects', p.state)).length + rows.reduce((n, p) => n + p.milestones.filter(m => stateHasPlainMoney('milestones', m.state)).length, 0)
+        const hist = await plainHistory(log.entries)
+        const bytes = hist.reduce((n, e) => n + e.body.length, 0)
+        const start = h('button', { id: 'lock-start', on: { click: () => busy(start, 'Starting…', async () => {
+            try {
+                await act('/api/owner/vault/start', { action: 'vault.start', totals }, undefined, { lockBody: true })
+                S.lockingStarted = true
+                writePin({ lockingStarted: true })
+                lockTab(body)
+            } catch (e) { say(msg, 'bad', e.message) }
+        }) } }, 'Start locking (signed)')
+        body.replaceChildren(h('h2', { text: 'Lock existing data' }),
+            h('div', { class: 'panel', id: 'lock-step-summary' },
+                h('h3', { text: 'What will be locked' }),
+                h('ul', { id: 'lock-counts' },
+                    h('li', { text: `${plainRecords} record(s) with amounts: project budgets and milestone payments (percentage and amount)` }),
+                    h('li', { text: `${hist.length} owner history bodies (${Math.round(bytes / 1024)} KB): salaries, bank details, expenses and letter texts inside them` })),
+                h('h3', { text: 'Totals before locking' }), totalsList(totals),
+                h('p', { class: 'small', text: 'After locking, the console unlocks everything again and checks these totals. From the start, every change sent from this console is locked, and the server refuses plain amounts. You can stop at any time and continue later.' }),
+                msg, start))
+    } catch (e) { body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+}
+
+// Screen 3: locking (records first, then history), safe to stop and continue.
+const lockRun = (body, msg, st) => {
+    let stop = false
+    const progress = h('ul', { id: 'lock-progress' })
+    const note = text => progress.append(h('li', { text }))
+    const stopBtn = h('button', { class: 'secondary', id: 'lock-stop', on: { click: () => { stop = true; stopBtn.disabled = true; stopBtn.textContent = 'Stopping after this batch…' } } }, 'Stop')
+    const go = h('button', { id: 'lock-continue', on: { click: () => busy(go, 'Locking…', async () => {
+        stop = false; stopBtn.disabled = false; stopBtn.textContent = 'Stop'
+        try {
+            // 1. Records: each one replaced in one update, only while it is still exactly the plain state read here.
+            for (;;) {
+                const rows = await api('GET', '/api/owner/projects', { sign: true })
+                const todo = [...rows.filter(p => stateHasPlainMoney('projects', p.state)), ...rows.flatMap(p => p.milestones).filter(m => stateHasPlainMoney('milestones', m.state))]
+                if (!todo.length) break
+                if (stop) return note('Stopped. Nothing is half-locked; continue any time.')
+                const batch = todo.slice(0, 50)
+                const changes = []
+                for (const r of batch) changes.push({ key: r.key, state: await lockState(S.vaultKey, r.key, r.state), from: await stateHash(r.key, r.state) })
+                const res = await act('/api/owner/vault/lock-records', { action: 'vault.lock', changes })
+                note(`Locked ${res.locked} record(s); ${todo.length - batch.length} to go.`)
+            }
+            note('Project budgets and milestone payments: all locked.')
+            // 2. History bodies: each replaced by its locked form (its signed hash stays), in batches of up to ~4 MB.
+            for (;;) {
+                const log = await api('GET', '/api/owner/log', { sign: true })
+                const todo = await plainHistory(log.entries)
+                if (!todo.length) break
+                if (stop) return note('Stopped. Nothing is half-locked; continue any time.')
+                const entries = [], locked = []
+                let size = 0
+                for (const e of todo) {
+                    const l = await lockValue(S.vaultKey, bodyPlace(e.request.nonce), e.body)
+                    if (entries.length && (size + l.length > 4_000_000 || entries.length >= 200)) break
+                    entries.push({ seq: e.seq, bodyHash: e.request.bodyHash, lockedSha256: await sha256Hex(l), index: await historyIndex(JSON.parse(e.body)) })
+                    locked.push(l); size += l.length
+                }
+                const res = await act('/api/owner/vault/lock-history', { action: 'vault.history', entries }, undefined, { locked })
+                note(`Locked ${res.moved} history bodies; ${todo.length - entries.length} to go.`)
+            }
+            note('Owner history bodies: all locked.')
+            lockCheck(body, msg)
+        } catch (e) { say(msg, 'bad', `${e.message} Nothing is half-locked: press Continue to carry on.`) }
+    }) } }, 'Continue locking')
+    body.replaceChildren(h('h2', { text: 'Lock existing data' }),
+        h('div', { class: 'panel', id: 'lock-step-run' },
+            h('p', { text: `Still plain: ${st.plain.projects} project budget(s), ${st.plain.milestones} milestone payment(s), ${st.plain.historyBodies} history bodies.` }),
+            h('p', { class: 'small muted', text: 'Records first, then the history. Safe to stop at any point: each value is either plain or locked, never both.' }),
+            msg, h('div', { class: 'row' }, go, stopBtn), progress))
+}
+
+/** The totals signed at the start (inside the locked body of the "vault.start" entry). */
+const startTotals = async () => {
+    const log = await api('GET', '/api/owner/log', { sign: true })
+    const { bodies } = await readBodies(log.entries, S.vaultKey)
+    const e = [...log.entries].reverse().find(x => x.action === 'vault.start' && bodies.has(x.seq))
+    return e ? JSON.parse(bodies.get(e.seq)).totals : null
+}
+
+// Screen 4: re-read everything, unlock it, compare the totals, then finish.
+const lockCheck = async (body, msg) => {
+    body.replaceChildren(h('p', { class: 'muted', text: 'Re-reading and unlocking everything…' }))
+    try {
+        const before = await startTotals()
+        const { totals: after, broken } = await lockTotals()
+        const same = !broken && before && sameTotals(before, after)
+        const finish = h('button', { id: 'lock-finish', disabled: !same, on: { click: () => busy(finish, 'Finishing…', async () => {
+            try { await act('/api/owner/vault/finish', { action: 'vault.finish' }); S.lockingFinished = true; lockTab(body, alertBox('good', null, h('p', { text: 'Locking finished.' }))) } catch (e) { say(msg, 'bad', e.message) }
+        }) } }, 'Finish (signed)')
+        body.replaceChildren(h('h2', { text: 'Lock existing data' }),
+            h('div', { class: 'panel', id: 'lock-step-check' },
+                h('h3', { text: 'Totals before locking (signed at the start)' }), before ? totalsList(before) : h('p', { text: 'Not found.' }),
+                h('h3', { text: 'Totals now, unlocked by this console' }), totalsList(after),
+                same ? alertBox('good', null, h('p', { id: 'lock-totals-match', text: '✔ The totals match. Every amount unlocks with your key.' }))
+                    : alertBox('bad', null, h('p', { id: 'lock-totals-differ', text: broken ? 'Some amounts do not unlock. Run Verify everything.' : 'The totals differ. If you changed budgets or payments since starting, that explains it; otherwise run Verify everything.' })),
+                msg, finish))
+    } catch (e) { body.replaceChildren(alertBox('bad', null, h('p', { text: e.message }))) }
+}
+
+const lockDone = async (body, msg, st) => {
+    const check = h('button', { class: 'secondary', id: 'lock-recheck', on: { click: () => lockCheck(body, msg) } }, 'Check the totals again')
+    body.replaceChildren(h('h2', { text: 'Locked data' }), msg,
+        h('div', { class: 'panel', id: 'lock-step-done' },
+            h('p', { text: 'Locking is finished. Project budgets, milestone payments and every owner history body are stored locked; the server refuses plain amounts.' }),
+            h('p', { class: 'small', text: `Still plain: ${st.plain.projects} project budget(s), ${st.plain.milestones} milestone payment(s), ${st.plain.historyBodies} history bodies (0 expected).` }),
+            h('p', { class: 'small', text: 'After locking: delete old database exports and dumps (including any made with Compass), and rotate or delete hosting backups and Atlas snapshots taken before locking. They still hold the plain values.' }),
+            check))
 }
 
 /* ---------------- Expenses ---------------- */

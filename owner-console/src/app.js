@@ -26,6 +26,8 @@ const S = {
     fingerprint: null,
     clockOffset: 0,       // server time - laptop time
     tab: 'payroll',
+    lockingStarted: false, // Phase 2: a signed "start locking" entry exists (from the server at login, or remembered here)
+    lockingFinished: false,
     idleTimer: null,
     lockedReason: '',
 }
@@ -74,16 +76,30 @@ const writePin = patch => { const p = { ...(readPin() || {}), ...patch, updatedA
 
 class ApiError extends Error { constructor(status, message) { super(message); this.status = status } }
 
-const api = async (method, path, { body, sign, attachment, raw } = {}) => {
-    const text = body === undefined ? '' : JSON.stringify(body)
+// Phase 2: after locking has started, these requests may still send a plain body (nothing in them is stored, or
+// they hold only entry numbers and hashes). Same list as the server (ownerHttp.ts).
+const PLAIN_AFTER_START = ['/api/owner/login', '/api/owner/keys', '/api/owner/vault/lock-history']
+
+const api = async (method, path, { body, sign, attachment, raw, locked, lockBody } = {}) => {
+    let text = body === undefined ? '' : JSON.stringify(body)
     const headers = {}
     if (text) headers['Content-Type'] = 'application/json'
-    // An attachment (signature image, logo) goes next to the signed text; the signed text names its SHA-256.
-    let sendText = text
-    if (attachment) { headers['X-Owner-Attachment'] = '1'; headers['Content-Type'] = 'application/json'; sendText = JSON.stringify({ signed: text, attachment: toB64(attachment) }) }
     const key = sign === true ? S.signingKey : sign
+    const nonce = toB64Url(randomBytes(16))
+    // Extra parts next to the signed text; the signed text names each one's SHA-256:
+    //   attachment (signature image, logo), inner (the real body of a locked request), locked (history bodies being moved)
+    const parts = {}
+    if (key && text && method !== 'GET' && (lockBody ?? (S.lockingStarted && !PLAIN_AFTER_START.includes(path)))) {
+        // Locked request: the signed (and stored) body holds only the action, the index and the locked real body.
+        parts.inner = text
+        text = JSON.stringify({ v: 2, action: String(body?.action ?? ''), index: await historyIndex(body), inner: { sha256: await sha256Hex(text), locked: await lockValue(S.vaultKey, bodyPlace(nonce), text) } })
+    }
+    if (attachment) parts.attachment = toB64(attachment)
+    if (locked) parts.locked = locked
+    let sendText = text
+    if (Object.keys(parts).length) { headers['X-Owner-Parts'] = '1'; headers['Content-Type'] = 'application/json'; sendText = JSON.stringify({ signed: text, ...parts }) }
     if (key) {
-        const sig = await signRequest(key, { method, path, body: text, ts: Date.now() + S.clockOffset })
+        const sig = await signRequest(key, { method, path, body: text, ts: Date.now() + S.clockOffset, nonce })
         headers['X-Owner-Ts'] = sig['X-Owner-Ts']; headers['X-Owner-Nonce'] = sig['X-Owner-Nonce']; headers['X-Owner-Sig'] = sig['X-Owner-Sig']
     }
     let res
@@ -414,7 +430,11 @@ const finishLogin = async (keys, publicKey) => {
     const r = await api('POST', '/api/owner/login', { body: { challenge }, sign: true })
     S.rollback = null
     if (pin?.chainCount && r.log.count < pin.chainCount) S.rollback = { was: pin.chainCount, now: r.log.count }
-    writePin({ fingerprint: fp })
+    // Locking (Phase 2): once started, this laptop remembers it and never sends a plain body again, whatever the server says.
+    S.lockingStarted = r.vault?.started === true || pin?.lockingStarted === true
+    S.lockingFinished = r.vault?.finished === true
+    S.vaultMissing = pin?.lockingStarted === true && r.vault?.started !== true
+    writePin({ fingerprint: fp, ...(S.lockingStarted ? { lockingStarted: true } : {}) })
     touch()
     return r
 }
@@ -511,8 +531,8 @@ const staleVerifyNote = () => {
 }
 
 /** Signed action; remembers the new history position. */
-const act = async (path, body, attachment) => {
-    const r = await api('POST', path, { body, sign: true, attachment })
+const act = async (path, body, attachment, options = {}) => {
+    const r = await api('POST', path, { body, sign: true, attachment, ...options })
     if (r?.log) writePin({ chainCount: r.log.seq, chainHead: r.log.head })
     return r
 }
@@ -547,13 +567,13 @@ const lineItemsEditor = (id, rows, disabled = false) => {
 /** Integrity check for some records only (before paying): returns the flags for those keys. */
 const flagsFor = async keys => {
     const [log, integ] = await Promise.all([api('GET', '/api/owner/log', { sign: true }), api('GET', '/api/owner/integrity', { sign: true })])
-    const r = await checkIntegrity(log.entries, integ.records)
+    const r = await checkIntegrity(log.entries, integ.records, undefined, S.vaultKey)
     return r.flags.filter(f => keys.includes(f.key))
 }
 
 const mainScreen = () => {
     if (!S.signingKey) return boot()
-    const tabs = [['payroll', 'Payroll'], ['people', 'People'], ['requests', 'Requests'], ['companies', 'Companies'], ['projects', 'Projects'], ['expenses', 'Expenses'], ['letters', 'Letters'], ['verify', 'Verify'], ['settings', 'Settings']]
+    const tabs = [['payroll', 'Payroll'], ['people', 'People'], ['requests', 'Requests'], ['companies', 'Companies'], ['projects', 'Projects'], ['finance', 'Finance'], ['expenses', 'Expenses'], ['letters', 'Letters'], ['verify', 'Verify'], ['lock', S.lockingFinished ? 'Locked data' : 'Lock data'], ['settings', 'Settings']]
     const body = h('div', { id: 'tab-body' })
     const bar = h('div', { class: 'tabs', role: 'tablist' }, ...tabs.map(([id, label]) =>
         h('button', { role: 'tab', id: `tab-${id}`, class: S.tab === id ? 'on' : '', on: { click: () => { S.tab = id; mainScreen() } } }, label)))
@@ -566,8 +586,10 @@ const mainScreen = () => {
             h('button', { class: 'secondary', id: 'lock-now', on: { click: () => lock('Locked.') } }, 'Lock')),
         S.rollback ? alertBox('bad', 'WARNING: the owner history is shorter than before',
             h('p', { text: `This console last saw ${S.rollback.was} entries; the server now has ${S.rollback.now}. Entries were removed. Treat this as a security incident.` })) : null,
+        S.vaultMissing ? alertBox('bad', 'WARNING: the server no longer knows that locking started',
+            h('p', { text: 'This console started "Lock existing data" earlier, but the server\'s history has no such entry now. Run Verify everything and treat this as a security incident. The console keeps locking everything it sends.' })) : null,
         bar, body)
-    ;({ payroll: payrollTab, people: peopleTab, requests: requestsTab, companies: companiesTab, projects: projectsTab, expenses: expensesTab, letters: lettersTab, verify: verifyTab, settings: settingsTab })[S.tab](body)
+    ;({ payroll: payrollTab, people: peopleTab, requests: requestsTab, companies: companiesTab, projects: projectsTab, finance: financeTab, expenses: expensesTab, letters: lettersTab, verify: verifyTab, lock: lockTab, settings: settingsTab })[S.tab](body)
 }
 
 /* ---------------- Payroll ---------------- */
@@ -871,7 +893,9 @@ const verifyTab = body => {
             const then = d.entries.find(e => e.seq === pin.chainCount)
             if (!then || then.hash !== pin.chainHead) problems.push({ seq: pin.chainCount, problem: 'differs from the entry this console saw before (the history was rewritten)' })
         }
-        const r = await checkIntegrity(problems.length ? d.entries.filter(() => false) : d.entries, integ.records)
+        const r = await checkIntegrity(problems.length ? d.entries.filter(() => false) : d.entries, integ.records, undefined, S.vaultKey)
+        // Locked bodies (Phase 2): each one unlocked here and checked against its signed hash and index.
+        problems.push(...(r.bodyProblems ?? []))
         writePin({ verifiedAt: new Date().toISOString(), ...(problems.length ? {} : { chainCount: v.count, chainHead: v.head }) })
         document.getElementById('last-verified')?.replaceChildren(`Verify everything: ${verifiedText()}`)
 

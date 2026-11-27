@@ -12,6 +12,8 @@
  *   of the name or email is stored (certificates, salary slips, history, chats, free text).
  * - Money: salaries, allowances, deductions, expenses, taxes, budgets and milestone payments get random
  *   amounts; totals are recomputed so slips and expenses still add up.
+ * - Locked values (Phase 2, "SMBV1.…": budgets and milestone payments, readable only in the Owner Console) are
+ *   blanked before anything else and then get random amounts like the rest; nothing is ever unlocked.
  * - Bank details, IBANs, account numbers and phone numbers are replaced; every password becomes DEV_PASSWORD.
  * - Free text that can hold anything (letters: title, subject, body, filled-in values; expense descriptions
  *   and notes; salary notes; history entries; client names; vendors) is replaced with sample text.
@@ -263,6 +265,8 @@ const transforms: Record<string, (d: Doc) => Doc | null> = {
     },
     milestones: d => {
         const budget = projectBudgets.get(String(d.projectId))
+        // A blanked locked share (null) becomes a random one, so the copy still has payments to look at.
+        if (typeof d.paymentPercentage !== 'number') d.paymentPercentage = Math.round(Math.random() * 3000) / 100
         const pct = Number(d.paymentPercentage) || 0
         d.paymentAmount = budget !== undefined && pct > 0 ? Math.round(budget * pct) / 100 : amount(500, 20000)
         if (budget && d.paymentMode === 'amount') d.paymentPercentage = Math.min(100, Math.round((d.paymentAmount / budget) * 10000) / 100)
@@ -388,6 +392,7 @@ const main = async () => {
                 batch = []
             }
             for await (const raw of from.find({})) {
+                blankLocked(raw)
                 const doc = transform ? transform(raw) : raw
                 if (!doc) { skipped++; continue }
                 delete doc.ownerSeal   // Owner Console seals are hashes of the REAL protected values: not copied
@@ -411,6 +416,16 @@ const main = async () => {
     } finally {
         await src.close()
         await dst.close()
+    }
+}
+
+/** Replaces every locked value (any field, any depth) with null: unreadable anyway, and not to be copied as is. */
+function blankLocked(value: any): void {
+    if (!value || typeof value !== 'object') return
+    for (const k of Object.keys(value)) {
+        const v = value[k]
+        if (typeof v === 'string' && /^SMBV\d+\./.test(v)) value[k] = null
+        else if (v && typeof v === 'object' && !(v instanceof ObjectId) && !(v instanceof Date) && !Buffer.isBuffer(v)) blankLocked(v)
     }
 }
 

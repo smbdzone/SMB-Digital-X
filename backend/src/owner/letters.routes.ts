@@ -47,7 +47,7 @@ const inputOf = (b: any) => {
 /** The letter as it will be stored, in protected form (what the console signs). */
 const stateFromPreview = (p: any, employeeId: string) => certificateState({
     employeeId, companyId: p.companyId, companyName: p.companyName, kind: p.kind, typeKey: p.typeKey, title: p.title, subject: p.subject,
-    body: p.body, issueDate: p.issueDate, signatory: p.signatory, recipient: p.recipient, status: 'active', revokeReason: null,
+    body: p.body, issueDate: p.issueDate, signatory: p.signatory, recipient: p.recipient, status: 'issued', revokeReason: null,
 })
 
 router.get('/letters/types', requireOwner, async (req, res) => {

@@ -51,7 +51,8 @@ router.post('/expenses', requireOwner, async (req, res) => {
     for (const c of b.changes) {
         const { type, id, hash } = assertCanonical(c?.key, c?.state)
         if (type !== 'expenses') throw badRequest(`${c.key} is not an expense`)
-        const doc = await Expense.findById(id).lean()
+        // The collection itself: the model hides deleted expenses (so a deleted one is found and refused below).
+        const doc = await Expense.collection.findOne({ _id: new Types.ObjectId(id) })
         if (!doc) throw notFound(`Expense ${id} not found`)
         const now = expenseState(doc), s = c.state
         if (s.addedBy !== now.addedBy) throw badRequest('Who added an expense cannot change')
@@ -83,7 +84,7 @@ router.post('/expenses', requireOwner, async (req, res) => {
         if (s.isDeleted && !p.now.isDeleted) Object.assign($set, { deletedAt: new Date(), deletedBy: o.key.ownerUserId })
         if (s.paymentMethod === null) delete $set.paymentMethod
         await Expense.updateOne({ _id: p.id }, { $set, ...(s.paymentMethod === null ? { $unset: { paymentMethod: '' } } : {}) })
-        const after = expenseState((await Expense.findById(p.id).lean())!)
+        const after = expenseState((await Expense.collection.findOne({ _id: new Types.ObjectId(p.id) }))!)
         if (canonicalJson(after) !== canonicalJson(s)) throw new Error(`Stored state of ${p.key} differs from the signed state`)
     }
     const entry = await appendOwnerLog({ action: 'expense.update', recordId: plan.length === 1 ? plan[0].id : `${plan.length} expenses`, request: o.request, body: bodyText(req), result: { ok: true, count: plan.length } })

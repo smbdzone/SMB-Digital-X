@@ -43,7 +43,8 @@ export const currentRecords = async (types: RecordType[] = RECORD_TYPES): Promis
         for (const m of await Milestone.find().lean()) out.push({ key: keyOf('milestones', m._id), label: `Milestone payment: ${projectName.get(String(m.projectId)) ?? '?'} / ${m.title}`, state: milestoneState(m) })
     }
     if (types.includes('expenses')) {
-        for (const e of await Expense.find().lean()) out.push({ key: keyOf('expenses', e._id), label: `Expense: ${e.description} (${e.currency} ${e.totalAmount}, ${nameOf.get(String(e.addedBy)) ?? '?'})`, state: expenseState(e) })
+        // Straight from the collection: the model hides deleted expenses, but a deleted one is still a signed record.
+        for (const e of (await Expense.collection.find({}).toArray()) as any[]) out.push({ key: keyOf('expenses', e._id), label: `Expense: ${e.description} (${e.currency} ${e.totalAmount}, ${nameOf.get(String(e.addedBy)) ?? '?'})`, state: expenseState(e) })
     }
     if (types.includes('certificates')) {
         for (const c of await Certificate.find().lean()) out.push({ key: keyOf('certificates', c._id), label: `Letter ${c.referenceNo}: ${c.recipient?.name ?? '?'}`, state: certificateState(c), signed: !!c.signedAt })

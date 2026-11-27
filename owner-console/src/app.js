@@ -829,7 +829,7 @@ const extraSummary = by => {
         projects.length ? `Project budgets: ${projects.filter(p => p.budget > 0).length} of ${projects.length} projects, total ${money(projects.reduce((t, p) => t + p.budget, 0), 'AED')}` : null,
         ms.length ? `Milestone payments: ${ms.length} (paid ${sum(ms.filter(m => m.paymentStatus === 'paid'), m => m.paymentAmount, m => m.currency)}; invoiced ${sum(ms.filter(m => m.paymentStatus === 'invoiced'), m => m.paymentAmount, m => m.currency)})` : null,
         ex.length ? `Expenses: ${['pending', 'approved', 'reimbursed', 'rejected'].map(st => `${st} ${ex.filter(e => e.status === st).length} (${sum(ex.filter(e => e.status === st), e => e.totalAmount, e => e.currency)})`).join('; ')}` : null,
-        lt.length ? `Letters and certificates: ${lt.length} (${lt.filter(l => l.status === 'active').length} active, ${lt.filter(l => l.status === 'revoked').length} revoked)` : null,
+        lt.length ? `Letters and certificates: ${lt.length} (${lt.filter(l => l.status === 'issued').length} issued, ${lt.filter(l => l.status === 'revoked').length} revoked)` : null,
     ]
 }
 

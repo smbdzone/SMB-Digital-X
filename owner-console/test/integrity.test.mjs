@@ -128,7 +128,7 @@ test('expenses: signed pending, edited by the employee while pending -> fine; ap
 
 test('letters: "signed" must come from a signed entry that carried a signature', async () => {
     seq = 0
-    const letter = I.normalizeCertificate({ employeeId: uid, companyId: 'cccccccccccccccccccccccc', companyName: 'Co', kind: 'letter', typeKey: 'experience_letter', title: 'Experience Letter', body: 'Text', issueDate: '2026-11-27', recipient: { name: 'Ann' }, status: 'active' })
+    const letter = I.normalizeCertificate({ employeeId: uid, companyId: 'cccccccccccccccccccccccc', companyName: 'Co', kind: 'letter', typeKey: 'experience_letter', title: 'Experience Letter', body: 'Text', issueDate: '2026-11-27', recipient: { name: 'Ann' }, status: 'issued' })
     assert.equal(letter.subject, ''); assert.equal(letter.issueDate, '2026-11-27T00:00:00.000Z')
     const plain = await entry({ action: 'letter.issue', changes: [{ key: `certificates/${lid}`, state: letter }] })
     const adopt = await entry({ action: 'adopt', types: allTypes, changes: [] })

@@ -317,7 +317,7 @@ const lettersTab = async (body, message = null) => {
     const list = h('table', { id: 'letters-table' }, h('thead', {}, h('tr', {}, ...['Ref', 'To', 'Title', 'Status', ''].map(t => h('th', { text: t })))),
         h('tbody', {}, ...letters.slice(0, 100).map(l => {
             const acts = []
-            if (l.state.status === 'active') {
+            if (l.state.status === 'issued') {
                 const reason = inputT(`rv-${l.id}`, '', { placeholder: 'Reason', size: 14 })
                 acts.push(reason, twoStep(h('button', { class: 'danger', 'data-revoke': l.id }, 'Revoke'), 'Confirm: revoke', async () => {
                     try { await act(`/api/owner/letters/${l.id}/revoke`, { action: 'letter.revoke', changes: [{ key: l.key, state: normalizeCertificate({ ...l.state, status: 'revoked', revokeReason: reason.value.trim() || null }) }] }); lettersTab(body, alertBox('good', null, h('p', { text: `Revoked ${l.referenceNo}.` }))) } catch (e) { fail(e) }

@@ -19,8 +19,7 @@ import ProjectOverview from '@/components/projects/ProjectOverview'
 import { useProjectMilestones } from '@/hooks/useProjectMilestones'
 import { StatCard, ProjectStatus, TextAreaField } from '@/components/ui/shared'
 import { formatDay, toDateInput } from '@/lib/formatDay'
-import { formatCurrency, formatMoney } from '@/lib/utils'
-import { fetchProjectExpenses, type CurrencyTotal } from '@/services/expense.services'
+import LockedValue from '@/components/ui/LockedValue'
 
 type TabId = 'overview' | 'milestones' | 'expenses' | 'tasks'
 
@@ -62,7 +61,7 @@ const ProjectDetailsPage = () => {
     const [saving, setSaving] = useState(false)
     const [form, setForm] = useState({
         name: '', clientName: '', category: '', startDate: '',
-        deadline: '', budget: '', status: 'Planning', description: '',
+        deadline: '', status: 'Planning', description: '',
     })
 
     useEffect(() => {
@@ -111,7 +110,6 @@ const ProjectDetailsPage = () => {
             category: project.category ?? '',
             startDate: toDateInput(project.startDate),
             deadline: toDateInput(project.deadline),
-            budget: String(project.budget),
             status: project.status,
             description: project.description ?? '',
         })
@@ -128,9 +126,6 @@ const ProjectDetailsPage = () => {
         if (!form.name.trim() || !form.clientName.trim() || !form.category.trim() || !form.startDate) {
             return toast.showError('Please fill all required fields')
         }
-        if (form.budget === '' || !Number.isFinite(Number(form.budget)) || Number(form.budget) < 0) {
-            return toast.showError('Valid budget is required')
-        }
         if (form.deadline && form.deadline < form.startDate) {
             return toast.showError('Deadline cannot be before the start date')
         }
@@ -142,7 +137,6 @@ const ProjectDetailsPage = () => {
             description: form.description.trim(),
             startDate: form.startDate,
             deadline: form.deadline || undefined,
-            budget: Number(form.budget),
             status: form.status as Project['status'],
         }
 
@@ -153,7 +147,6 @@ const ProjectDetailsPage = () => {
                 toast.showSuccess('Project updated successfully')
                 setProject(response.data ?? project)
                 setEditOpen(false)
-                milestones.reload() // the budget may have changed, so milestone amounts must refresh
             } else {
                 toast.showError(response.message || 'Failed to update project')
             }
@@ -265,8 +258,9 @@ const ProjectDetailsPage = () => {
 
             {/* Key numbers */}
             <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-                <StatCard title="Project Budget" value={formatMoney(project.budget)} icon={<FiDollarSign />} />
-                <ProjectExpenseStat projectId={project._id} />
+                {/* Budget and spending are set and calculated in the Owner Console (Finance). */}
+                <StatCard title="Project Budget" value={<LockedValue />} icon={<FiDollarSign />} />
+                <StatCard title="Total Expenses" value={<LockedValue />} icon={<FiDollarSign />} />
                 <StatCard
                     title="Milestones"
                     value={summary ? `${summary.completed}/${summary.total}` : '-'}
@@ -331,7 +325,7 @@ const ProjectDetailsPage = () => {
                     <Input label="Client / Company" name="clientName" required value={form.clientName} handleChange={handleFormChange} />
                     <Input label="Start Date" name="startDate" type="date" required value={form.startDate} handleChange={handleFormChange} />
                     <Input label="Deadline" name="deadline" type="date" value={form.deadline} handleChange={handleFormChange} />
-                    <Input label="Budget" name="budget" type="number" min={0} required value={form.budget} handleChange={handleFormChange} />
+                    <div className="flex items-end"><LockedValue className="pb-3" /></div>
                     <Input label="Category" name="category" required value={form.category} handleChange={handleFormChange} />
                     <SelectField
                         label="Status"
@@ -356,26 +350,6 @@ const ProjectDetailsPage = () => {
             </ModalBox>
         </div>
     )
-}
-
-// Project expense total, per currency (the API returns totalExpense = null when currencies are mixed)
-const ProjectExpenseStat = ({ projectId }: { projectId: string }) => {
-    const { token } = useAuth()
-    const [totals, setTotals] = useState<CurrencyTotal[]>([])
-
-    useEffect(() => {
-        if (!token) return
-        const load = async () => {
-            try {
-                const response = await fetchProjectExpenses(token, projectId)
-                if (response.success) setTotals(response.data?.totalsByCurrency ?? [])
-            } catch (error) { console.error(error) }
-        }
-        load()
-    }, [token, projectId])
-
-    const value = totals.length ? totals.map(t => formatCurrency(t.total, t.currency)).join(' + ') : formatMoney(0)
-    return <StatCard title="Total Expenses" value={value} subtitle="Rejected expenses excluded" icon={<FiDollarSign />} />
 }
 
 export default ProjectDetailsPage

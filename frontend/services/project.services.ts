@@ -20,7 +20,8 @@ export interface Project {
     description?: string;
     startDate: string;
     deadline?: string;
-    budget: number;
+    // The budget is never sent to the website: it is set and shown only in the Owner Console.
+    budgetLocked?: boolean;
     status: ProjectStatus;
     employees?: ProjectEmployee[];
     // Employee responses only: whether they are a member of the project (admins get `employees`)
@@ -36,7 +37,6 @@ export interface CreateProjectPayload {
     description?: string;
     startDate: string;
     deadline?: string;
-    budget?: number;   // set in the Owner Console; the website sends none
     status?: ProjectStatus;
     employees?: string[];
 }

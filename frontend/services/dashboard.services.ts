@@ -16,30 +16,18 @@ export interface DashboardEmployeeStats {
     active: number;
 }
 
-export interface DashboardExpenseStats {
-    total: number;
-    monthly: number;
-}
-
-export interface DashboardBudgetStats {
-    total: number;
-    remaining: number;
-}
 
 export interface DashboardData {
     projects: DashboardProjectStats;
 
     employees: DashboardEmployeeStats;
 
-    expenses: DashboardExpenseStats;
-
-    budget: DashboardBudgetStats;
+    // Company-wide finance figures are only in the Owner Console.
+    finance: { locked: true };
 
     recentProjects: any[];
 
     recentExpenses: any[];
-
-    expenseByProject: any[];
 }
 
 export const fetchDashboard = (

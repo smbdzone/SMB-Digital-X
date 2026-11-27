@@ -12,9 +12,7 @@ import {
     type DeliverablePayload,
     type Milestone,
     type MilestonePayload,
-    type MilestonePaymentStatus,
     type MilestoneStatus,
-    type PaymentMode,
 } from '@/services/milestone.services'
 import { toDateInput } from '@/lib/formatDay'
 import { errorMessage } from '@/lib/utils'
@@ -46,11 +44,8 @@ interface FormState {
     description: string
     startDate: string
     deadline: string
-    paymentMode: PaymentMode
-    paymentValue: string
     currency: string
     status: MilestoneStatus
-    paymentStatus: MilestonePaymentStatus
     notes: string
 }
 
@@ -59,11 +54,8 @@ const emptyForm = (currency: string): FormState => ({
     description: '',
     startDate: '',
     deadline: '',
-    paymentMode: 'percentage',
-    paymentValue: '',
     currency,
     status: 'pending',
-    paymentStatus: 'unpaid',
     notes: '',
 })
 
@@ -86,11 +78,8 @@ const MilestoneForm = ({ open, onClose, projectId, milestone, defaultCurrency, o
                 description: milestone.description ?? '',
                 startDate: toDateInput(milestone.startDate),
                 deadline: toDateInput(milestone.deadline),
-                paymentMode: milestone.paymentMode,
-                paymentValue: String(milestone.paymentMode === 'amount' ? milestone.paymentAmount : milestone.paymentPercentage),
                 currency: milestone.currency || defaultCurrency,
                 status: milestone.status,
-                paymentStatus: milestone.paymentStatus,
                 notes: milestone.notes ?? '',
             })
             setDeliverables(milestone.deliverables.map(d => ({

@@ -2,19 +2,16 @@ import { Request, Response } from 'express'
 import { Types } from 'mongoose'
 import Milestone, {
     IMilestone,
-    MILESTONE_PAYMENT_STATUSES,
     MILESTONE_STATUSES,
-    MilestonePaymentStatus,
     MilestoneStatus,
 } from '../model/milestone.model.js'
 import Project from '../model/project.model.js'
-import { round2, sumMoney } from '../utils/money.js'
+import { round2 } from '../utils/money.js'
 import {
     AuthUser,
     asAmount,
     asCurrency,
     asDate,
-    asPercent,
     asText,
     badRequest,
     forbidden,
@@ -38,16 +35,9 @@ const asStatus = (value: unknown): MilestoneStatus => {
     return value as MilestoneStatus
 }
 
-const asPaymentStatus = (value: unknown): MilestonePaymentStatus => {
-    if (typeof value !== 'string' || !(MILESTONE_PAYMENT_STATUSES as readonly string[]).includes(value)) {
-        throw badRequest(`paymentStatus must be one of: ${MILESTONE_PAYMENT_STATUSES.join(', ')}`)
-    }
-    return value as MilestonePaymentStatus
-}
-
 // Admin: any project. Employee: only projects they are assigned to.
 const loadProject = async (projectId: string, auth: AuthUser) => {
-    const project = await Project.findById(projectId).select('name budget status employees').lean()
+    const project = await Project.findById(projectId).select('name status employees').lean()
     if (!project) throw notFound('Project not found')
     if (!isAdmin(auth) && !project.employees.some(e => String(e) === auth.id)) {
         throw forbidden('You are not assigned to this project')
@@ -55,40 +45,28 @@ const loadProject = async (projectId: string, auth: AuthUser) => {
     return project
 }
 
-// The admin types a percentage OR an amount; the other value follows the project budget.
-// So the share always stays correct even if the budget is edited later.
-const percentOf = (m: { paymentMode?: string; paymentPercentage?: number; paymentAmount?: number }, budget: number): number => {
-    if (m.paymentMode === 'amount') return budget > 0 ? (m.paymentAmount ?? 0) / budget * 100 : 0
-    return m.paymentPercentage ?? 0
-}
+// Money (the project budget, each milestone's share and amount, and their totals) is set and shown only in the Owner
+// Console; once locking has started the database holds it as locked values that only the console can read. The website
+// never sends any of it to the browser, not even to the admin: it shows "Locked: view in the Owner Console" instead.
+const HIDDEN_MONEY = ['paymentPercentage', 'paymentAmount', 'ownerSeal'] as const
 
-const amountOf = (m: { paymentMode?: string; paymentPercentage?: number; paymentAmount?: number }, budget: number): number => {
-    if (m.paymentMode === 'amount') return m.paymentAmount ?? 0
-    return round2(budget * (m.paymentPercentage ?? 0) / 100)
-}
-
-// Shape returned to the frontend: payment values recalculated from the current budget + handy flags.
-const toView = (raw: any, budget: number) => {
-    const m = typeof raw.toObject === 'function' ? raw.toObject() : raw
+// Shape returned to the frontend: the work fields and handy flags, no money.
+const toView = (raw: any) => {
+    const m = { ...(typeof raw.toObject === 'function' ? raw.toObject() : raw) }
+    for (const f of HIDDEN_MONEY) delete m[f]
     const deliverables: any[] = m.deliverables ?? []
     const isOverdue = !!m.deadline && m.status !== 'completed' && new Date(m.deadline).getTime() < Date.now()
     return {
         ...m,
-        paymentPercentage: round2(percentOf(m, budget)),
-        paymentAmount: amountOf(m, budget),
+        paymentLocked: true,
         isOverdue,
         deliverablesTotal: deliverables.length,
         deliverablesDone: deliverables.filter(d => d.isDone).length,
     }
 }
 
-const buildSummary = (views: ReturnType<typeof toView>[], budget: number) => {
+const buildSummary = (views: ReturnType<typeof toView>[]) => {
     const count = (s: MilestoneStatus) => views.filter(v => v.status === s).length
-    const paid = sumMoney(views.filter(v => v.paymentStatus === 'paid').map(v => v.paymentAmount))
-    const invoiced = sumMoney(views.filter(v => v.paymentStatus === 'invoiced').map(v => v.paymentAmount))
-    const allocated = sumMoney(views.map(v => v.paymentAmount))
-    const allocatedPercent = round2(views.reduce((s, v) => s + v.paymentPercentage, 0))
-
     return {
         total: views.length,
         pending: count('pending'),
@@ -97,20 +75,13 @@ const buildSummary = (views: ReturnType<typeof toView>[], budget: number) => {
         delayed: count('delayed'),
         overdue: views.filter(v => v.isOverdue).length,
         progressPercent: views.length ? round2(count('completed') / views.length * 100) : 0,
-        budget,
-        allocatedPercent,
-        allocatedAmount: allocated,
-        unallocatedPercent: round2(Math.max(0, 100 - allocatedPercent)),
-        unallocatedAmount: round2(Math.max(0, budget - allocated)),
-        paidAmount: paid,
-        invoicedAmount: invoiced,
-        unpaidAmount: round2(allocated - paid - invoiced),
+        financeLocked: true,
     }
 }
 
-// Employees see the work (title, dates, status, deliverables), never the money: no budget, payment share,
-// amount, currency or payment status.
-const FINANCE_FIELDS = ['paymentMode', 'paymentPercentage', 'paymentAmount', 'currency', 'paymentStatus', 'invoicedAt', 'paidAt'] as const
+// Employees see the work (title, dates, status, deliverables), nothing about payment: no payment mode, currency or
+// payment status either. The admin also sees the payment status and its dates (not amounts).
+const FINANCE_FIELDS = ['paymentMode', 'currency', 'paymentStatus', 'invoicedAt', 'paidAt', 'paymentLocked'] as const
 
 const forViewer = (view: ReturnType<typeof toView>, auth: AuthUser) => {
     if (isAdmin(auth)) return view
@@ -121,36 +92,8 @@ const forViewer = (view: ReturnType<typeof toView>, auth: AuthUser) => {
 
 const summaryForViewer = (summary: ReturnType<typeof buildSummary>, auth: AuthUser) => {
     if (isAdmin(auth)) return summary
-    const { total, pending, inProgress, completed, delayed, overdue, progressPercent } = summary
-    return { total, pending, inProgress, completed, delayed, overdue, progressPercent }
-}
-
-// All milestones of one project must never promise more than 100% of the budget.
-const assertWithinBudget = async (projectId: string | Types.ObjectId, budget: number, newPercent: number, excludeId?: string) => {
-    const others = await Milestone.find({ projectId, ...(excludeId ? { _id: { $ne: excludeId } } : {}) })
-        .select('paymentMode paymentPercentage paymentAmount')
-        .lean()
-    const used = others.reduce((sum, m) => sum + percentOf(m, budget), 0)
-    if (used + newPercent > 100.01) {
-        throw badRequest(
-            `Milestone payments cannot exceed 100% of the project budget. Already allocated: ${round2(used)}%, remaining: ${round2(Math.max(0, 100 - used))}%`
-        )
-    }
-}
-
-// Reads { paymentPercentage } or { paymentAmount } from the body. If both are sent, the percentage wins.
-const parsePayment = (b: any, budget: number) => {
-    if (isSent(b.paymentPercentage)) {
-        const pct = asPercent(b.paymentPercentage, 'paymentPercentage')
-        return { paymentMode: 'percentage' as const, paymentPercentage: pct, paymentAmount: round2(budget * pct / 100) }
-    }
-    if (isSent(b.paymentAmount)) {
-        const amount = asAmount(b.paymentAmount, 'paymentAmount')
-        if (budget <= 0 && amount > 0) throw badRequest('The project budget is 0. Set a project budget before adding a payment amount')
-        const pct = budget > 0 ? round2(amount / budget * 100) : 0
-        return { paymentMode: 'amount' as const, paymentPercentage: pct, paymentAmount: amount }
-    }
-    return undefined
+    const { financeLocked: _locked, ...rest } = summary
+    return rest
 }
 
 const parseDeliverables = (value: unknown, existing: any[] = []) => {
@@ -180,20 +123,6 @@ const applyStatus = (m: IMilestone, status: MilestoneStatus) => {
     else m.completedAt = undefined
 }
 
-const applyPaymentStatus = (m: IMilestone, status: MilestonePaymentStatus, paidAt?: Date) => {
-    m.paymentStatus = status
-    if (status === 'paid') {
-        m.paidAt = paidAt ?? m.paidAt ?? new Date()
-        m.invoicedAt = m.invoicedAt ?? m.paidAt
-    } else if (status === 'invoiced') {
-        m.invoicedAt = m.invoicedAt ?? new Date()
-        m.paidAt = undefined
-    } else {
-        m.invoicedAt = undefined
-        m.paidAt = undefined
-    }
-}
-
 /* ------------------------------------------------------------------ */
 /* Controllers                                                         */
 /* ------------------------------------------------------------------ */
@@ -205,14 +134,14 @@ export const getProjectMilestones = async (req: Request, res: Response): Promise
     const project = await loadProject(projectId, auth)
 
     const milestones = await Milestone.find({ projectId }).sort({ order: 1, createdAt: 1 }).lean()
-    const views = milestones.map(m => toView(m, project.budget))
+    const views = milestones.map(m => toView(m))
 
     res.status(200).json({
         success: true,
         project: isAdmin(auth)
-            ? { id: project._id, name: project.name, status: project.status, budget: project.budget }
+            ? { id: project._id, name: project.name, status: project.status, budgetLocked: true }
             : { id: project._id, name: project.name, status: project.status },
-        summary: summaryForViewer(buildSummary(views, project.budget), auth),
+        summary: summaryForViewer(buildSummary(views), auth),
         data: views.map(v => forViewer(v, auth)),
     })
 }
@@ -223,19 +152,16 @@ export const getMilestone = async (req: Request, res: Response): Promise<void> =
     const milestone = await Milestone.findById(paramId(req))
     if (!milestone) throw notFound('Milestone not found')
 
-    const project = await loadProject(String(milestone.projectId), auth)
-    res.status(200).json({ success: true, data: forViewer(toView(milestone, project.budget), auth) })
+    await loadProject(String(milestone.projectId), auth)
+    res.status(200).json({ success: true, data: forViewer(toView(milestone), auth) })
 }
 
 // POST /api/milestones/project/:projectId  (admin)
 export const createMilestone = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const projectId = paramId(req, 'projectId')
-    const project = await loadProject(projectId, auth)
+    await loadProject(projectId, auth)
     const b = req.body ?? {}
-
-    const payment = parsePayment(b, project.budget) ?? { paymentMode: 'percentage' as const, paymentPercentage: 0, paymentAmount: 0 }
-    await assertWithinBudget(projectId, project.budget, payment.paymentPercentage)
 
     // New milestones go to the end unless an order is given.
     let order: number
@@ -253,7 +179,9 @@ export const createMilestone = async (req: Request, res: Response): Promise<void
         order,
         startDate: isSent(b.startDate) ? asDate(b.startDate, 'startDate') : undefined,
         deadline: isSent(b.deadline) ? asDate(b.deadline, 'deadline') : undefined,
-        ...payment,
+        paymentMode: 'percentage',   // payments are set in the Owner Console (the guard refuses them here)
+        paymentPercentage: 0,
+        paymentAmount: 0,
         currency: isSent(b.currency) ? asCurrency(b.currency) : 'AED',
         deliverables: b.deliverables !== undefined ? parseDeliverables(b.deliverables) : [],
         notes: asText(b.notes, 'notes', { max: 2000 }),
@@ -261,10 +189,9 @@ export const createMilestone = async (req: Request, res: Response): Promise<void
     })
 
     if (isSent(b.status)) applyStatus(milestone, asStatus(b.status))
-    if (isSent(b.paymentStatus)) applyPaymentStatus(milestone, asPaymentStatus(b.paymentStatus), isSent(b.paidAt) ? asDate(b.paidAt, 'paidAt') : undefined)
 
     await milestone.save()
-    res.status(201).json({ success: true, message: 'Milestone added', data: toView(milestone, project.budget) })
+    res.status(201).json({ success: true, message: 'Milestone added', data: toView(milestone) })
 }
 
 // PATCH /api/milestones/:id  (admin) - only the fields that are sent are changed
@@ -273,7 +200,7 @@ export const updateMilestone = async (req: Request, res: Response): Promise<void
     const milestone = await Milestone.findById(paramId(req))
     if (!milestone) throw notFound('Milestone not found')
 
-    const project = await loadProject(String(milestone.projectId), auth)
+    await loadProject(String(milestone.projectId), auth)
     const b = req.body ?? {}
 
     if (b.title !== undefined) milestone.title = asText(b.title, 'title', { required: true, max: 150 })
@@ -286,25 +213,16 @@ export const updateMilestone = async (req: Request, res: Response): Promise<void
     if (b.startDate !== undefined) milestone.startDate = isSent(b.startDate) ? asDate(b.startDate, 'startDate') : undefined
     if (b.deadline !== undefined) milestone.deadline = isSent(b.deadline) ? asDate(b.deadline, 'deadline') : undefined
 
-    const payment = parsePayment(b, project.budget)
-    if (payment) {
-        await assertWithinBudget(milestone.projectId, project.budget, payment.paymentPercentage, String(milestone._id))
-        milestone.paymentMode = payment.paymentMode
-        milestone.paymentPercentage = payment.paymentPercentage
-        milestone.paymentAmount = payment.paymentAmount
-    }
-
     if (b.deliverables !== undefined) {
         milestone.set('deliverables', parseDeliverables(b.deliverables, milestone.deliverables as any))
     }
 
     if (isSent(b.status)) applyStatus(milestone, asStatus(b.status))
-    if (isSent(b.paymentStatus)) applyPaymentStatus(milestone, asPaymentStatus(b.paymentStatus), isSent(b.paidAt) ? asDate(b.paidAt, 'paidAt') : undefined)
 
     milestone.updatedBy = new Types.ObjectId(auth.id)
     await milestone.save()
 
-    res.status(200).json({ success: true, message: 'Milestone updated', data: toView(milestone, project.budget) })
+    res.status(200).json({ success: true, message: 'Milestone updated', data: toView(milestone) })
 }
 
 // PATCH /api/milestones/:id/status  (admin)  body: { status }
@@ -313,27 +231,12 @@ export const updateMilestoneStatus = async (req: Request, res: Response): Promis
     const milestone = await Milestone.findById(paramId(req))
     if (!milestone) throw notFound('Milestone not found')
 
-    const project = await loadProject(String(milestone.projectId), auth)
+    await loadProject(String(milestone.projectId), auth)
     applyStatus(milestone, asStatus(req.body?.status))
     milestone.updatedBy = new Types.ObjectId(auth.id)
     await milestone.save()
 
-    res.status(200).json({ success: true, message: 'Milestone status updated', data: toView(milestone, project.budget) })
-}
-
-// PATCH /api/milestones/:id/payment  (admin)  body: { paymentStatus, paidAt? }
-export const updateMilestonePayment = async (req: Request, res: Response): Promise<void> => {
-    const auth = getAuth(req)
-    const milestone = await Milestone.findById(paramId(req))
-    if (!milestone) throw notFound('Milestone not found')
-
-    const project = await loadProject(String(milestone.projectId), auth)
-    const b = req.body ?? {}
-    applyPaymentStatus(milestone, asPaymentStatus(b.paymentStatus), isSent(b.paidAt) ? asDate(b.paidAt, 'paidAt') : undefined)
-    milestone.updatedBy = new Types.ObjectId(auth.id)
-    await milestone.save()
-
-    res.status(200).json({ success: true, message: 'Milestone payment updated', data: toView(milestone, project.budget) })
+    res.status(200).json({ success: true, message: 'Milestone status updated', data: toView(milestone) })
 }
 
 // PATCH /api/milestones/:id/deliverables/:deliverableId  (admin)  body: { isDone? } - toggles when omitted
@@ -353,15 +256,15 @@ export const toggleDeliverable = async (req: Request, res: Response): Promise<vo
     milestone.updatedBy = new Types.ObjectId(auth.id)
     await milestone.save()
 
-    const project = await loadProject(String(milestone.projectId), auth)
-    res.status(200).json({ success: true, message: 'Deliverable updated', data: toView(milestone, project.budget) })
+    await loadProject(String(milestone.projectId), auth)
+    res.status(200).json({ success: true, message: 'Deliverable updated', data: toView(milestone) })
 }
 
 // PATCH /api/milestones/project/:projectId/reorder  (admin)  body: { order: [milestoneId, ...] }
 export const reorderMilestones = async (req: Request, res: Response): Promise<void> => {
     const auth = getAuth(req)
     const projectId = paramId(req, 'projectId')
-    const project = await loadProject(projectId, auth)
+    await loadProject(projectId, auth)
 
     const ids: unknown = req.body?.order
     if (!Array.isArray(ids) || ids.length === 0) throw badRequest('order must be a non-empty array of milestone ids')
@@ -381,7 +284,7 @@ export const reorderMilestones = async (req: Request, res: Response): Promise<vo
     res.status(200).json({
         success: true,
         message: 'Milestones reordered',
-        data: milestones.map(m => toView(m, project.budget)),
+        data: milestones.map(m => toView(m)),
     })
 }
 

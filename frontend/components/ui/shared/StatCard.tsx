@@ -4,7 +4,7 @@ import { FiArrowRight } from 'react-icons/fi'
 
 interface StatCardProps {
     title: string
-    value: string | number
+    value: React.ReactNode
     subtitle?: string
     icon: React.ReactNode
     href?: string

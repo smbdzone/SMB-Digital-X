@@ -74,9 +74,11 @@ export interface CurrencyTotal {
 
 export interface ExpenseListData {
     expenses: Expense[];
-    // null when the results mix currencies, use totalsByCurrency instead
-    totalExpense: number | null;
-    totalsByCurrency: CurrencyTotal[];
+    // Employees only (their own expenses). null when the results mix currencies: use totalsByCurrency instead.
+    totalExpense?: number | null;
+    totalsByCurrency?: CurrencyTotal[];
+    // Admin: company-wide totals are calculated in the Owner Console only.
+    totalsLocked?: boolean;
 }
 
 export type ExpenseListResponse = ApiEnvelope<ExpenseListData> & { pagination: Pagination };

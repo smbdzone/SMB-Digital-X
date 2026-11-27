@@ -5,7 +5,7 @@ import { FiBriefcase, FiCalendar, FiCheckSquare, FiDollarSign, FiFlag, FiTag } f
 import type { Project } from '@/services/project.services'
 import type { MilestoneListResponse } from '@/services/milestone.services'
 import { formatDay } from '@/lib/formatDay'
-import { formatCurrency, formatMoney } from '@/lib/utils'
+import LockedValue from '@/components/ui/LockedValue'
 import { ProjectStatus } from '@/components/ui/shared'
 
 interface Props {
@@ -42,7 +42,7 @@ const ProjectOverview = ({ project, milestones, onOpenMilestones }: Props) => {
                         <Detail icon={<FiTag className="size-4" />} label="Category">{project.category || '-'}</Detail>
                         <Detail icon={<FiCalendar className="size-4" />} label="Start date">{formatDay(project.startDate)}</Detail>
                         <Detail icon={<FiFlag className="size-4" />} label="Deadline">{project.deadline ? formatDay(project.deadline) : 'No deadline'}</Detail>
-                        <Detail icon={<FiDollarSign className="size-4" />} label="Budget">{formatMoney(project.budget)}</Detail>
+                        <Detail icon={<FiDollarSign className="size-4" />} label="Budget"><LockedValue /></Detail>
                         <Detail icon={<FiCheckSquare className="size-4" />} label="Status"><ProjectStatus status={project.status} /></Detail>
                     </div>
                 </section>
@@ -75,8 +75,7 @@ const ProjectOverview = ({ project, milestones, onOpenMilestones }: Props) => {
                                     </p>
                                 </div>
                                 <div className="text-right">
-                                    <p className="font-heading text-sm font-bold text-charcoal">{formatCurrency(next.paymentAmount, next.currency)}</p>
-                                    <p className="text-xs text-charcoal/45">{next.paymentPercentage}% of budget</p>
+                                    <LockedValue className="text-xs" />
                                 </div>
                             </div>
                             {next.deliverablesTotal > 0 && (

@@ -7,6 +7,14 @@ import { getAuth, isAdmin, isObjectId } from '../utils/http.js'
 // What an employee may see of a project they work on: no budget, no team contact details.
 const EMPLOYEE_PROJECT_FIELDS = 'name clientName description category startDate deadline status'
 
+// What the admin sees: everything except the budget, which is set and shown only in the Owner Console (and, once
+// locking has started, is a locked value only the console can read). "Locked: view in the Owner Console" instead.
+const adminView = (project: any) => {
+    if (!project) return project
+    const { budget: _budget, ownerSeal: _seal, ...rest } = typeof project.toObject === 'function' ? project.toObject() : project
+    return { ...rest, budgetLocked: true }
+}
+
 // The projects an employee may read: those they are a member of, or have at least one task in.
 const employeeProjectFilter = async (employeeId: string) => {
     const id = new Types.ObjectId(employeeId)
@@ -62,7 +70,7 @@ export const createProjectController = async (
         res.status(201).json({
             success: true,
             message: 'Project created successfully',
-            data: project
+            data: adminView(project)
         })
     } catch (error) {
         console.error('Create project error:', error)
@@ -83,9 +91,10 @@ export const getProjectsController = async (
     try {
         const auth = getAuth(req)
         const projects = isAdmin(auth)
-            ? await Project.find()
+            ? (await Project.find()
                 .populate('employees', 'name email role')
                 .sort({ createdAt: -1 })
+                .lean()).map(adminView)
             : (await Project.find(await employeeProjectFilter(auth.id))
                 .select(`${EMPLOYEE_PROJECT_FIELDS} employees`)
                 .sort({ createdAt: -1 })
@@ -122,7 +131,7 @@ export const getProjectController = async (
         // An employee gets the same 404 for a project they cannot read as for one that does not exist.
         let project
         if (isAdmin(auth)) {
-            project = await Project.findById(id).populate('employees', 'name email role')
+            project = adminView(await Project.findById(id).populate('employees', 'name email role').lean())
         } else {
             const found = await Project.findOne({ $and: [{ _id: new Types.ObjectId(id) }, await employeeProjectFilter(auth.id)] })
                 .select(`${EMPLOYEE_PROJECT_FIELDS} employees`)
@@ -184,7 +193,7 @@ export const updateProjectController = async (
         res.status(200).json({
             success: true,
             message: 'Project updated successfully',
-            data: project
+            data: adminView(project)
         })
     } catch (error) {
         console.error('Update project error:', error)

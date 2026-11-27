@@ -10,26 +10,6 @@ export const getDashboard = async (
     try {
         /*
         |--------------------------------------------------------------------------
-        | Dates
-        |--------------------------------------------------------------------------
-        */
-
-        const now = new Date();
-
-        const startOfMonth = new Date(
-            now.getFullYear(),
-            now.getMonth(),
-            1
-        );
-
-        const startOfNextMonth = new Date(
-            now.getFullYear(),
-            now.getMonth() + 1,
-            1
-        );
-
-        /*
-        |--------------------------------------------------------------------------
         | Project Statistics
         |--------------------------------------------------------------------------
         */
@@ -74,78 +54,10 @@ export const getDashboard = async (
             });
 
         /*
-        |--------------------------------------------------------------------------
-        | Expense Statistics
-        |--------------------------------------------------------------------------
+        | Company-wide finance figures (total and monthly expenses, total and remaining budget, spending by project)
+        | are calculated in the Owner Console's Finance view from data it can unlock; the website shows
+        | "Locked: view in the Owner Console" instead.
         */
-
-        const expenseStats =
-            await Expense.aggregate([
-                // only approved / reimbursed expenses count (not pending or rejected)
-                { $match: { status: { $in: ["approved", "reimbursed"] } } },
-                {
-                    $group: {
-                        _id: null,
-                        total: {
-                            $sum: "$totalAmount",
-                        },
-                    },
-                },
-            ]);
-
-        const totalExpenses =
-            expenseStats[0]?.total || 0;
-
-        /*
-        |--------------------------------------------------------------------------
-        | Current Month Expenses
-        |--------------------------------------------------------------------------
-        */
-
-        const monthlyExpenseStats =
-            await Expense.aggregate([
-                {
-                    $match: {
-                        status: { $in: ["approved", "reimbursed"] },
-                        date: {
-                            $gte: startOfMonth,
-                            $lt: startOfNextMonth,
-                        },
-                    },
-                },
-                {
-                    $group: {
-                        _id: null,
-                        total: {
-                            $sum: "$totalAmount",
-                        },
-                    },
-                },
-            ]);
-
-        const monthlyExpenses =
-            monthlyExpenseStats[0]?.total || 0;
-
-        /*
-        |--------------------------------------------------------------------------
-        | Project Budget
-        |--------------------------------------------------------------------------
-        */
-
-        const budgetStats =
-            await Project.aggregate([
-                {
-                    $group: {
-                        _id: null,
-                        totalBudget: {
-                            $sum: "$budget",
-                        },
-                    },
-                },
-            ]);
-
-        const totalProjectBudget =
-            budgetStats[0]?.totalBudget || 0;
 
         /*
         |--------------------------------------------------------------------------
@@ -160,7 +72,7 @@ export const getDashboard = async (
                 })
                 .limit(5)
                 .select(
-                    "name clientName budget status deadline createdAt"
+                    "name clientName status deadline createdAt"
                 )
                 .lean();
 
@@ -188,62 +100,6 @@ export const getDashboard = async (
 
         /*
         |--------------------------------------------------------------------------
-        | Expense By Project
-        |--------------------------------------------------------------------------
-        */
-
-        const expenseByProject =
-            await Expense.aggregate([
-                { $match: { status: { $in: ["approved", "reimbursed"] } } },
-                {
-                    $group: {
-                        _id: "$projectId",
-                        total: {
-                            $sum: "$totalAmount",
-                        },
-                    },
-                },
-
-                {
-                    $sort: {
-                        total: -1,
-                    },
-                },
-
-                {
-                    $limit: 10,
-                },
-
-                {
-                    $lookup: {
-                        from: "projects",
-                        localField: "_id",
-                        foreignField: "_id",
-                        as: "project",
-                    },
-                },
-
-                {
-                    $unwind: {
-                        path: "$project",
-                        preserveNullAndEmptyArrays: true,
-                    },
-                },
-
-                {
-                    $project: {
-                        _id: 1,
-                        total: 1,
-                        project: {
-                            _id: "$project._id",
-                            name: "$project.name",
-                        },
-                    },
-                },
-            ]);
-
-        /*
-        |--------------------------------------------------------------------------
         | Response
         |--------------------------------------------------------------------------
         */
@@ -266,23 +122,11 @@ export const getDashboard = async (
                     active: activeEmployees,
                 },
 
-                expenses: {
-                    total: totalExpenses,
-                    monthly: monthlyExpenses,
-                },
-
-                budget: {
-                    total: totalProjectBudget,
-                    remaining:
-                        totalProjectBudget -
-                        totalExpenses,
-                },
+                finance: { locked: true },
 
                 recentProjects,
 
                 recentExpenses,
-
-                expenseByProject,
             },
         });
     } catch (error) {

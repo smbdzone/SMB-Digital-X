@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react'
 import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
+import LockedValue from '@/components/ui/LockedValue';
 import { FiPlus, FiEdit, FiTrash2, FiEye, FiCalendar, FiDollarSign } from 'react-icons/fi'
 import { useRouter } from 'next/navigation'
 import { useAuth } from '@/context/AuthContext'
@@ -24,7 +25,7 @@ const Projects = () => {
     const [editProjectId, setEditProjectId] = useState('')
 
     const [form, setForm] = useState({
-        name: '', clientName: '', description: '', startDate: '', deadline: '', budget: '', category: '', status: 'Planning'
+        name: '', clientName: '', description: '', startDate: '', deadline: '', category: '', status: 'Planning'
     })
 
     useEffect(() => {
@@ -58,7 +59,7 @@ const Projects = () => {
     }
 
     const resetForm = () => {
-        setForm({ name: '', clientName: '', description: '', startDate: '', deadline: '', budget: '', category: '', status: 'Planning' })
+        setForm({ name: '', clientName: '', description: '', startDate: '', deadline: '', category: '', status: 'Planning' })
         setEditProjectId('')
     }
 
@@ -75,7 +76,6 @@ const Projects = () => {
             description: project.description || '',
             startDate: project.startDate ? project.startDate.slice(0, 10) : '',
             deadline: project.deadline ? project.deadline.slice(0, 10) : '',
-            budget: String(project.budget),
             category: project.category,
             status: project.status
         })
@@ -179,7 +179,7 @@ const Projects = () => {
                             <div className="mt-5 grid grid-cols-2 gap-3">
                                 <div className="rounded-xl bg-charcoal/[0.03] p-3">
                                     <div className="flex items-center gap-2 text-xs text-charcoal/50"><FiDollarSign /> Budget</div>
-                                    <p className="mt-1 font-semibold">{project.budget.toLocaleString()}</p>
+                                    <p className="mt-1"><LockedValue className="text-xs" /></p>
                                 </div>
                                 <div className="rounded-xl bg-charcoal/[0.03] p-3">
                                     <div className="flex items-center gap-2 text-xs text-charcoal/50"><FiCalendar /> Deadline</div>

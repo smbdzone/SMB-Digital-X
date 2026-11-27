@@ -3,11 +3,11 @@
 import React, { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { FiArrowRight, FiBriefcase, FiCalendar, FiCheckCircle, FiCheckSquare, FiClock, FiDollarSign, FiFileText, FiList, FiUsers, FiTrendingUp, FiAlertCircle } from 'react-icons/fi'
+import LockedValue from '@/components/ui/LockedValue'
 import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import { fetchDashboard, DashboardData } from '@/services/dashboard.services'
 import { StatCard, SectionHeader, EmptyState, ProjectStatus } from '@/components/ui/shared'
-import { formatMoney } from '@/lib/utils'
 import { DaySummary, fetchDaySummary } from '@/services/deliverable.services'
 
 const AdminDashboard = () => {
@@ -60,8 +60,9 @@ const AdminDashboard = () => {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <StatCard title="Total Projects" value={dashboard.projects.total} subtitle={`${dashboard.projects.active} active projects`} icon={<FiBriefcase className="size-5" />} href="/projects" />
                 <StatCard title="Employees" value={dashboard.employees.total} subtitle={`${dashboard.employees.active} active employees`} icon={<FiUsers className="size-5" />} href="/employees" />
-                <StatCard title="Total Expenses" value={formatMoney(dashboard.expenses.total)} subtitle={`${formatMoney(dashboard.expenses.monthly)} this month`} icon={<FiDollarSign className="size-5" />} href="/expenses" />
-                <StatCard title="Remaining Budget" value={formatMoney(dashboard.budget.remaining)} subtitle={`of ${formatMoney(dashboard.budget.total)} total budget`} icon={<FiTrendingUp className="size-5" />} href="/projects" />
+                {/* Company-wide finance figures are calculated in the Owner Console's Finance view. */}
+                <StatCard title="Total Expenses" value={<LockedValue />} icon={<FiDollarSign className="size-5" />} href="/expenses" />
+                <StatCard title="Remaining Budget" value={<LockedValue />} icon={<FiTrendingUp className="size-5" />} href="/projects" />
             </div>
 
             <TodaysPlans />
@@ -91,15 +92,7 @@ const AdminDashboard = () => {
 
             <div className="rounded-2xl border border-charcoal/5 bg-white shadow-sm">
                 <SectionHeader title="Expenses by Project" href="/expenses" action="View expenses" />
-                {dashboard.expenseByProject.length === 0 ? <EmptyState text="No project expenses found." /> : (
-                    <div className="p-5 sm:p-6">
-                        <div className="space-y-5">
-                            {dashboard.expenseByProject.map((item) => (
-                                <ExpenseProjectRow key={item._id} item={item} totalBudget={dashboard.budget.total} />
-                            ))}
-                        </div>
-                    </div>
-                )}
+                <div className="p-5 sm:p-6"><LockedValue /></div>
             </div>
         </div>
     )
@@ -150,22 +143,6 @@ const ExpenseRow = ({ expense }:{ expense:any }) => {
             <div className="shrink-0 text-right">
                 <p className="text-sm font-semibold text-charcoal">{expense.currency} {Number(expense.totalAmount || 0).toFixed(2)}</p>
                 <p className="mt-0.5 text-xs text-charcoal/40">{expense.date ? new Date(expense.date).toLocaleDateString() : ''}</p>
-            </div>
-        </div>
-    )
-}
-
-// ----- ExpenseProjectRow (unchanged) -----
-const ExpenseProjectRow = ({ item, totalBudget }:{ item:any, totalBudget:any }) => {
-    const percentage = totalBudget > 0 ? Math.min((item.total / totalBudget) * 100, 100) : 0
-    return (
-        <div>
-            <div className="mb-2 flex items-center justify-between gap-4">
-                <div className="min-w-0"><p className="truncate text-sm font-semibold text-charcoal">{item.project?.name || 'No project (rent, utilities...)'}</p></div>
-                <p className="shrink-0 text-sm font-semibold text-charcoal">{Number(item.total || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</p>
-            </div>
-            <div className="h-2 overflow-hidden rounded-full bg-charcoal/5">
-                <div className="h-full rounded-full bg-blue-500 transition-all" style={{ width: `${percentage}%` }} />
             </div>
         </div>
     )

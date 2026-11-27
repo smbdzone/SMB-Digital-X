@@ -21,9 +21,10 @@ import {
     type MilestoneStatus,
 } from '@/services/milestone.services'
 import { formatDay } from '@/lib/formatDay'
-import { errorMessage, formatCurrency, formatDate } from '@/lib/utils'
+import { errorMessage, formatDate } from '@/lib/utils'
 import ButtonEmerald from '../ui/ButtonEmerald'
 import MilestoneForm from './MilestoneForm'
+import LockedValue from '@/components/ui/LockedValue'
 
 interface Props {
     projectId: string
@@ -48,13 +49,6 @@ const paymentBadge: Record<MilestonePaymentStatus, string> = {
     paid: 'bg-emerald-50 text-emerald-700',
 }
 
-// Colour of a milestone's slice in the payment bar
-const segmentColor: Record<MilestonePaymentStatus, string> = {
-    paid: 'bg-emerald-500',
-    invoiced: 'bg-amber-400',
-    unpaid: 'bg-charcoal/25',
-}
-
 const optionLabel = (options: { value: string; label: string }[], value: string) =>
     options.find(o => o.value === value)?.label ?? value
 
@@ -75,14 +69,6 @@ const Stat = ({ label, value, hint }: { label: string; value: string; hint?: str
         <p className="text-xs text-charcoal/45">{label}</p>
         <p className="mt-1 font-heading text-xl font-bold text-charcoal">{value}</p>
         {hint && <p className="mt-0.5 text-xs text-charcoal/45">{hint}</p>}
-    </div>
-)
-
-const LegendDot = ({ className, label, value }: { className: string; label: string; value: string }) => (
-    <div className="flex items-center gap-2 text-xs text-charcoal/60">
-        <span className={`size-2.5 rounded-full ${className}`} />
-        <span>{label}</span>
-        <span className="font-semibold text-charcoal">{value}</span>
     </div>
 )
 
@@ -138,7 +124,7 @@ const MilestoneItem = ({
 
                         <div className="mt-2 flex flex-wrap items-center gap-x-5 gap-y-1 text-xs text-charcoal/55">
                             <span className={m.isOverdue ? 'font-semibold text-red-600' : ''}>{m.deadline ? `Due ${formatDay(m.deadline)}` : 'No deadline'}</span>
-                            <span><span className="font-semibold text-charcoal">{formatCurrency(m.paymentAmount, m.currency)}</span> ({m.paymentPercentage}%)</span>
+                            <LockedValue className="text-xs" />
                             {m.deliverablesTotal > 0 && (
                                 <span className="flex items-center gap-2">
                                     <span className="h-1.5 w-16 overflow-hidden rounded-full bg-charcoal/10">
@@ -180,8 +166,7 @@ const MilestoneItem = ({
                         <dl className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                             <div><dt className="text-xs text-charcoal/45">Start</dt><dd className="mt-0.5 text-sm font-semibold">{formatDay(m.startDate)}</dd></div>
                             <div><dt className="text-xs text-charcoal/45">Deadline</dt><dd className={`mt-0.5 text-sm font-semibold ${m.isOverdue ? 'text-red-600' : ''}`}>{formatDay(m.deadline)}</dd></div>
-                            <div><dt className="text-xs text-charcoal/45">Share of budget</dt><dd className="mt-0.5 text-sm font-semibold">{m.paymentPercentage}%</dd></div>
-                            <div><dt className="text-xs text-charcoal/45">Payment</dt><dd className="mt-0.5 text-sm font-semibold">{formatCurrency(m.paymentAmount, m.currency)}</dd></div>
+                            <div className="col-span-2"><dt className="text-xs text-charcoal/45">Payment</dt><dd className="mt-0.5"><LockedValue /></dd></div>
                         </dl>
 
                         {m.deliverables.length > 0 && (
@@ -264,7 +249,9 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
 
     const milestones = data?.data ?? []
     const summary = data?.summary
-    const budget = data?.project.budget ?? 0
+    // New milestones take the currency the others share (AED otherwise).
+    const currencies = Array.from(new Set(milestones.map(m => m.currency)))
+    const cur = currencies.length === 1 ? currencies[0] : undefined
 
     // On first load, open the milestone that needs attention next.
     useEffect(() => {
@@ -288,10 +275,6 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
             setBusyId('')
         }
     }
-
-    // Amounts in the summary have no currency of their own: show one only if all milestones share it.
-    const currencies = Array.from(new Set(milestones.map(m => m.currency)))
-    const cur = currencies.length === 1 ? currencies[0] : undefined
 
     const counts: Record<Filter, number> = {
         all: milestones.length,
@@ -353,41 +336,16 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
                 <p className="rounded-2xl border border-charcoal/5 bg-white py-12 text-center text-sm text-red-500 shadow-sm">{error}</p>
             ) : (
                 <>
-                    {/* Payment plan */}
+                    {/* Payment plan: budget, shares, paid and invoiced amounts are only in the Owner Console (Finance). */}
                     {summary && (
                         <div className="rounded-2xl border border-charcoal/5 bg-white p-5 shadow-sm sm:p-6">
                             <div className="grid grid-cols-2 gap-5 lg:grid-cols-4">
-                                <Stat label="Project budget" value={formatCurrency(summary.budget, cur)} />
-                                <Stat label="Allocated" value={`${summary.allocatedPercent}%`} hint={`${formatCurrency(summary.allocatedAmount, cur)} planned`} />
-                                <Stat label="Paid" value={formatCurrency(summary.paidAmount, cur)} hint={summary.allocatedAmount > 0 ? `${Math.round((summary.paidAmount / summary.allocatedAmount) * 100)}% of planned` : undefined} />
+                                <div className="col-span-2 lg:col-span-3">
+                                    <p className="text-xs text-charcoal/45">Budget and payments</p>
+                                    <p className="mt-1"><LockedValue /></p>
+                                </div>
                                 <Stat label="Delivery" value={`${summary.progressPercent}%`} hint={`${summary.completed} of ${summary.total} completed`} />
                             </div>
-
-                            {/* Budget split bar: one slice per milestone, coloured by payment status */}
-                            <div className="mt-6">
-                                <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full bg-charcoal/[0.06]">
-                                    {milestones.filter(m => m.paymentPercentage > 0).map(m => (
-                                        <span
-                                            key={m._id}
-                                            className={`h-full ${segmentColor[m.paymentStatus]}`}
-                                            style={{ flex: `0 1 ${m.paymentPercentage}%` }}
-                                            title={`${m.title}: ${m.paymentPercentage}% - ${formatCurrency(m.paymentAmount, m.currency)} (${optionLabel(MILESTONE_PAYMENT_OPTIONS, m.paymentStatus)})`}
-                                        />
-                                    ))}
-                                </div>
-                                <div className="mt-3 flex flex-wrap gap-x-6 gap-y-2">
-                                    <LegendDot className="bg-emerald-500" label="Paid" value={formatCurrency(summary.paidAmount, cur)} />
-                                    <LegendDot className="bg-amber-400" label="Invoiced" value={formatCurrency(summary.invoicedAmount, cur)} />
-                                    <LegendDot className="bg-charcoal/25" label="Not invoiced" value={formatCurrency(summary.unpaidAmount, cur)} />
-                                    <LegendDot className="bg-charcoal/[0.08] ring-1 ring-charcoal/10" label="Unallocated" value={`${formatCurrency(summary.unallocatedAmount, cur)} (${summary.unallocatedPercent}%)`} />
-                                </div>
-                            </div>
-
-                            {budget <= 0 && (
-                                <div className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                                    This project&apos;s budget is 0, so payment amounts cannot be calculated. The budget is set in the Owner Console.
-                                </div>
-                            )}
                         </div>
                     )}
 

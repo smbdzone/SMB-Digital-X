@@ -88,21 +88,25 @@ const totalsByCurrency = async (filter: Record<string, unknown>) => {
     return rows.map(r => ({ currency: r._id as string, total: round2(r.total), count: r.count as number }))
 }
 
-const listResponse = async (filter: Record<string, unknown>, query: Request['query']) => {
+// Totals for the admin are company-wide finance figures: they are calculated in the Owner Console's Finance view, and
+// the website shows "Locked: view in the Owner Console" (totalsLocked). An employee still gets the totals of their own.
+const listResponse = async (filter: Record<string, unknown>, query: Request['query'], auth: AuthUser) => {
     const { page, limit, skip } = parsePagination(query)
+    const withTotals = !isAdmin(auth)
 
     const [expenses, total, totals] = await Promise.all([
         populateExpense(Expense.find(filter).sort({ date: -1, createdAt: -1 }).skip(skip).limit(limit)),
         Expense.countDocuments(filter),
-        totalsByCurrency(filter),
+        withTotals ? totalsByCurrency(filter) : Promise.resolve([]),
     ])
 
     return {
         data: {
             expenses,
-            // `totalExpense` only makes sense for a single currency; use totalsByCurrency otherwise.
-            totalExpense: totals.length === 1 ? totals[0].total : totals.length === 0 ? 0 : null,
-            totalsByCurrency: totals,
+            ...(withTotals
+                // `totalExpense` only makes sense for a single currency; use totalsByCurrency otherwise.
+                ? { totalExpense: totals.length === 1 ? totals[0].total : totals.length === 0 ? 0 : null, totalsByCurrency: totals }
+                : { totalsLocked: true }),
         },
         pagination: { page, limit, total, pages: Math.ceil(total / limit) },
     }
@@ -197,7 +201,7 @@ export const getAllExpenses = async (req: Request, res: Response): Promise<void>
         filter.$or = [{ description: rx }, { vendor: rx }]
     }
 
-    const { data, pagination } = await listResponse(filter, q)
+    const { data, pagination } = await listResponse(filter, q, auth)
     res.status(200).json({ success: true, message: 'Expenses fetched successfully', data, pagination })
 }
 
@@ -213,7 +217,7 @@ export const getProjectExpensesController = async (req: Request, res: Response):
 
     // An employee gets only their own expenses on the project, and totals of those only.
     const filter: Record<string, unknown> = { projectId: new Types.ObjectId(projectId), ...ownOnly(auth) }
-    const { data, pagination } = await listResponse(filter, req.query)
+    const { data, pagination } = await listResponse(filter, req.query, auth)
     res.status(200).json({ success: true, data, pagination })
 }
 

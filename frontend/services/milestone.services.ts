@@ -36,8 +36,8 @@ export interface Milestone {
     deadline?: string
 
     paymentMode: PaymentMode
-    paymentPercentage: number // share of the project budget (0-100), calculated from the current budget
-    paymentAmount: number     // money value of that share
+    // The share and the amount are never sent to the website: they are set and shown only in the Owner Console.
+    paymentLocked?: boolean
     currency: string
 
     deliverables: Deliverable[]
@@ -68,19 +68,12 @@ export interface MilestoneSummary {
     delayed: number
     overdue: number
     progressPercent: number
-    budget: number
-    allocatedPercent: number
-    allocatedAmount: number
-    unallocatedPercent: number
-    unallocatedAmount: number
-    paidAmount: number
-    invoicedAmount: number
-    unpaidAmount: number
+    financeLocked?: boolean   // budget, allocated, paid and invoiced amounts: Owner Console only
 }
 
 export interface MilestoneListResponse {
     success: boolean
-    project: { id: string; name: string; status: string; budget: number }
+    project: { id: string; name: string; status: string; budgetLocked?: boolean }
     summary: MilestoneSummary
     data: Milestone[]
 }
@@ -92,19 +85,15 @@ export interface DeliverablePayload {
     isDone?: boolean
 }
 
-// Send EITHER paymentPercentage OR paymentAmount (if both are sent the backend uses the percentage).
+// Payments (share, amount, invoiced, paid) are set in the Owner Console; the website sends none.
 export interface MilestonePayload {
     title?: string
     description?: string
     startDate?: string | null // null or '' clears the date
     deadline?: string | null
-    paymentPercentage?: number
-    paymentAmount?: number
     currency?: string
     deliverables?: DeliverablePayload[] // on update this REPLACES the list
     status?: MilestoneStatus
-    paymentStatus?: MilestonePaymentStatus
-    paidAt?: string
     notes?: string
 }
 

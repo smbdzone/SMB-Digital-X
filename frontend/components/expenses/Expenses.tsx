@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
+import LockedValue from '@/components/ui/LockedValue';
 import {
     FiEdit, FiEye, FiPaperclip, FiPlus, FiSearch, FiX,
 } from "react-icons/fi";
@@ -378,8 +379,17 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
                 </ButtonEmerald>
             </div>
 
-            {/* Totals (per currency, never mixed) */}
-            {fullPage ? (
+            {/* Totals (per currency, never mixed). The admin's totals are company-wide finance figures: Owner Console only. */}
+            {isAdmin ? (
+                fullPage ? (
+                    <div className="mb-5 rounded-2xl bg-charcoal/[0.025] p-5">
+                        <p className="text-sm text-charcoal/50">Total expenses</p>
+                        <p className="mt-1"><LockedValue /></p>
+                    </div>
+                ) : (
+                    <p className="mb-4 text-sm text-charcoal/60">Total: <LockedValue /></p>
+                )
+            ) : fullPage ? (
                 <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
                     {totals.length === 0 ? (
                         <div className="rounded-2xl bg-charcoal/[0.025] p-5">

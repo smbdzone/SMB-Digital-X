@@ -295,6 +295,7 @@ const transforms: Record<string, (d: Doc) => Doc | null> = {
     ownerkeys: () => null,
     ownernonces: () => null,
     ownerreports: () => null,
+    ownerlocks: () => null,
     bankchangerequests: d => {
         const who = personOf(d.employeeId)
         if (d.requested) d.requested = { method: 'bank', bankName: 'Dev Bank', holderName: who?.name ?? 'Sample Person', accountNumber: fakeAccount(), iban: fakeIban() }

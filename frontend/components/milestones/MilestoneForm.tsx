@@ -7,7 +7,6 @@ import { useAuth } from '@/context/AuthContext'
 import { useToast } from '@/context/ToastContext'
 import {
     createMilestone,
-    MILESTONE_PAYMENT_OPTIONS,
     MILESTONE_STATUS_OPTIONS,
     updateMilestone,
     type DeliverablePayload,
@@ -18,7 +17,7 @@ import {
     type PaymentMode,
 } from '@/services/milestone.services'
 import { toDateInput } from '@/lib/formatDay'
-import { errorMessage, formatCurrency } from '@/lib/utils'
+import { errorMessage } from '@/lib/utils'
 import ModalBox from '../ui/ModalBox'
 import Input from '../ui/Input'
 import SelectField from '../ui/SelectField'
@@ -30,9 +29,7 @@ interface Props {
     onClose: () => void
     projectId: string
     milestone?: Milestone | null // set = edit mode
-    budget: number
     defaultCurrency: string
-    remainingPercent: number // % of the budget still free for this milestone
     onSaved: () => void
 }
 
@@ -70,7 +67,7 @@ const emptyForm = (currency: string): FormState => ({
     notes: '',
 })
 
-const MilestoneForm = ({ open, onClose, projectId, milestone, budget, defaultCurrency, remainingPercent, onSaved }: Props) => {
+const MilestoneForm = ({ open, onClose, projectId, milestone, defaultCurrency, onSaved }: Props) => {
     const { token } = useAuth()
     const toast = useToast()
     const keyCounter = useRef(0)
@@ -117,15 +114,6 @@ const MilestoneForm = ({ open, onClose, projectId, milestone, budget, defaultCur
 
     const updateRow = (key: number, patch: Partial<DeliverableRow>) =>
         setDeliverables(rows => rows.map(r => (r.key === key ? { ...r, ...patch } : r)))
-
-    // What the typed payment value means in the other unit, for the helper text.
-    const paymentHint = () => {
-        const value = Number(form.paymentValue)
-        if (form.paymentValue === '' || !Number.isFinite(value)) return `Up to ${Math.round(remainingPercent * 100) / 100}% of the project budget is still available.`
-        if (budget <= 0) return 'The project budget is 0. Set a budget on the project to calculate payment amounts.'
-        if (form.paymentMode === 'percentage') return `= ${formatCurrency(Math.round(budget * value) / 100, form.currency)} of the ${formatCurrency(budget)} budget. Available: ${Math.round(remainingPercent * 100) / 100}%.`
-        return `= ${Math.round((value / budget) * 10000) / 100}% of the ${formatCurrency(budget)} budget. Available: ${Math.round(remainingPercent * 100) / 100}%.`
-    }
 
     const handleSubmit = async () => {
         if (!token) return

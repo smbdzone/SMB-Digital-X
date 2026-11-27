@@ -1,199 +1,14 @@
 'use client';
 
-import React, { useState } from 'react';
-import { FiDelete, FiEdit, FiPlus, FiTrash2 } from 'react-icons/fi';
+import React from 'react';
 
-import ModalBox from '../ui/ModalBox';
-import ButtonEmerald from '../ui/ButtonEmerald';
-import Input from '../ui/Input';
-import SelectField from '../ui/SelectField';
-import { TextAreaField } from '@/components/ui/shared';
 import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
-import { useAuth } from '@/context/AuthContext';
-import { useToast } from '@/context/ToastContext';
 import { useCompanies } from '@/hooks/useCompanies';
-import { Company, CompanyPayload, LETTERHEAD_DESIGNS, createCompany, letterheadLabel, deleteCompany, updateCompany } from '@/services/company.services';
-import { errorMessage } from '@/lib/utils';
+import { letterheadLabel } from '@/services/company.services';
 
-interface CompanyForm {
-    name: string;
-    code: string;
-    letterhead: string;   // '' = the design with the same code, else Plain
-    legalName: string;
-    logo: string;
-    brandColor: string;
-    address: string;
-    phone: string;
-    website: string;
-    currency: string;
-    isActive: boolean;
-    fromName: string;
-    fromEmail: string;
-    replyTo: string;
-    footerNote: string;
-    signatoryName: string;
-    signatoryTitle: string;
-    signature: string;
-}
-
-const emptyForm: CompanyForm = {
-    name: '', code: '', letterhead: '', legalName: '', logo: '', brandColor: '#0136B0', address: '', phone: '', website: '',
-    currency: 'AED', isActive: true, fromName: '', fromEmail: '', replyTo: '', footerNote: '',
-    signatoryName: '', signatoryTitle: '', signature: '',
-};
-
-const toForm = (c: Company): CompanyForm => ({
-    name: c.name, code: c.code, letterhead: c.letterhead ?? c.letterheadDesign ?? '', legalName: c.legalName ?? '', logo: c.logo ?? '', brandColor: c.brandColor || '#0136B0',
-    address: c.address ?? '', phone: c.phone ?? '', website: c.website ?? '', currency: c.currency || 'AED', isActive: c.isActive,
-    fromName: c.email?.fromName ?? '', fromEmail: c.email?.fromEmail ?? '', replyTo: c.email?.replyTo ?? '', footerNote: c.email?.footerNote ?? '',
-    signatoryName: c.signatory?.name ?? '', signatoryTitle: c.signatory?.title ?? '', signature: c.signatory?.signature ?? '',
-});
-
-const Section = ({ title, hint, children }: { title: string; hint?: string; children: React.ReactNode }) => (
-    <div className="space-y-4">
-        <div>
-            <h5 className="text-sm font-semibold text-charcoal">{title}</h5>
-            {hint && <p className="mt-0.5 text-xs text-charcoal/50">{hint}</p>}
-        </div>
-        {children}
-    </div>
-);
-
+/** Companies, read-only: adding, editing and (de)activating them is done in the Owner Console (signed and recorded). */
 const Companies = () => {
-    const { token } = useAuth();
-    const toast = useToast();
-    const { companies, loading, reload } = useCompanies({ all: true });
-
-    const [open, setOpen] = useState(false);
-    const [editing, setEditing] = useState<Company | null>(null);
-    const [form, setForm] = useState<CompanyForm>(emptyForm);
-    const [saving, setSaving] = useState(false);
-
-    const [selectedImage, setSelectedImage] = useState<File | null>(null)
-
-
-    const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-        const file = e.target.files?.[0];
-        if (file) {
-            setForm(prev => ({
-                ...prev,
-                logo: URL.createObjectURL(file)
-            }))
-            setSelectedImage(file)
-        }
-
-    }
-
-    const set = <K extends keyof CompanyForm>(key: K, value: CompanyForm[K]) => setForm(f => ({ ...f, [key]: value }));
-    const text = (key: keyof CompanyForm) => (e: React.ChangeEvent<HTMLInputElement>) => set(key, e.target.value as never);
-
-    const openCreate = () => { setEditing(null); setForm(emptyForm); setOpen(true); };
-    const openEdit = (company: Company) => { setEditing(company); setForm(toForm(company)); setOpen(true); };
-    const close = () => { setOpen(false); setEditing(null); };
-
-
-    const handleSave = async () => {
-        if (!token) return;
-        if (!form.name.trim()) return toast.showError('Company name is required');
-        if (!editing && !/^[a-z0-9-]+$/.test(form.code.trim().toLowerCase())) {
-            return toast.showError('Code may contain only lowercase letters, numbers and dashes');
-        }
-        if (!/^#[0-9a-fA-F]{6}$/.test(form.brandColor)) return toast.showError('Brand colour must look like #0136B0');
-        if (!/^[A-Za-z]{3}$/.test(form.currency.trim())) return toast.showError('Currency must be a 3-letter code, for example AED');
-
-
-        const formData: any = new FormData();
-        formData.append('name', form.name.trim());
-        formData.append('legalName', form.legalName.trim());
-        formData.append('brandColor', form.brandColor);
-        formData.append('address', form.address.trim());
-        formData.append('phone', form.phone.trim());
-        formData.append('website', form.website.trim());
-        formData.append('currency', form.currency.trim().toUpperCase());
-        formData.append('isActive', String(form.isActive));
-        formData.append('email[fromName]', form.fromName.trim());
-        formData.append('email[fromEmail]', form.fromEmail.trim());
-        formData.append('email[replyTo]', form.replyTo.trim());
-        formData.append('email[footerNote]', form.footerNote.trim());
-        formData.append('code', String(form.code))
-        formData.append('letterhead', form.letterhead)
-
-        formData.append('signatory[name]', form.signatoryName.trim());
-        formData.append('signatory[title]', form.signatoryTitle.trim());
-        formData.append('signatory[signature]', form.signature.trim());
-        if (selectedImage) {
-            formData.append('logo', selectedImage)
-        } else if (editing && form.logo) {
-            formData.append('logo', form.logo)
-        }
-
-        const payload: CompanyPayload = {
-            name: form.name.trim(),
-            legalName: form.legalName.trim(),
-            logo: form.logo.trim(),
-            brandColor: form.brandColor,
-            address: form.address.trim(),
-            phone: form.phone.trim(),
-            website: form.website.trim(),
-            currency: form.currency.trim().toUpperCase(),
-            isActive: form.isActive,
-            email: {
-                fromName: form.fromName.trim(),
-                fromEmail: form.fromEmail.trim(),
-                replyTo: form.replyTo.trim(),
-                footerNote: form.footerNote.trim(),
-            },
-            signatory: {
-                name: form.signatoryName.trim(),
-                title: form.signatoryTitle.trim(),
-                signature: form.signature.trim(),
-            },
-        };
-
-        setSaving(true);
-        try {
-            if (editing) {
-                await updateCompany(token, editing._id, formData);
-                toast.showSuccess('Company updated');
-            } else {
-                await createCompany(token, formData);
-                toast.showSuccess('Company created');
-            }
-            close();
-            await reload();
-        } catch (error) {
-            toast.showError(errorMessage(error, 'Failed to save company'));
-        } finally {
-            setSaving(false);
-        }
-    };
-
-    const handleDelete = async (id: string) => {
-        if (!token) return;
-        try {
-            const confirmMsg = confirm('Are you sure to delete company its not reverted')
-            if (confirmMsg) {
-                await deleteCompany(token, id)
-                toast.showSuccess('Company Deleted');
-                reload()
-            }
-        } catch (error) {
-            toast.showError(errorMessage(error, 'Failed to delete company'));
-        }
-    }
-
-    const toggleActive = async (company: Company) => {
-        if (!token) return;
-        const next = !company.isActive;
-        if (!next && !confirm(`Deactivate ${company.name}? It will no longer be selectable, but past salaries and expenses keep working.`)) return;
-        try {
-            await updateCompany(token, company._id, { isActive: next });
-            toast.showSuccess(next ? 'Company activated' : 'Company deactivated');
-            await reload();
-        } catch (error) {
-            toast.showError(errorMessage(error, 'Failed to update company'));
-        }
-    };
+    const { companies, loading } = useCompanies({ all: true });
 
     return (
         <>
@@ -203,12 +18,12 @@ const Companies = () => {
                     <p className="mt-1 text-sm text-charcoal/45">Branding and email settings used on salary slips.</p>
                 </div>
             </div>
-            <OwnerConsoleNote className="mb-5">Adding and changing companies (details, contacts, signatory, letterhead, logo) is done in the Owner Console.</OwnerConsoleNote>
+            <OwnerConsoleNote className="mb-5">Adding, changing and (de)activating companies (details, contacts, signatory, letterhead, logo) is done in the Owner Console.</OwnerConsoleNote>
 
             {loading && !companies.length ? (
                 <p className="py-10 text-center text-sm text-charcoal/50">Loading...</p>
             ) : companies.length === 0 ? (
-                <p className="py-10 text-center text-sm text-charcoal/50">No companies yet. Run the backend migration or add one.</p>
+                <p className="py-10 text-center text-sm text-charcoal/50">No companies yet. They are added in the Owner Console.</p>
             ) : (
                 <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                     {companies.map(company => (
@@ -242,107 +57,11 @@ const Companies = () => {
                                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${company.isActive ? 'bg-emerald-50 text-emerald-700' : 'bg-gray-100 text-gray-600'}`}>
                                     {company.isActive ? 'Active' : 'Inactive'}
                                 </span>
-                                <div className="flex items-center gap-1">
-                                    <button onClick={() => toggleActive(company)} className="rounded-lg px-3 py-2 text-xs font-semibold text-charcoal/60 transition hover:bg-charcoal/5">
-                                        {company.isActive ? 'Deactivate' : 'Activate'}
-                                    </button>
-
-                                </div>
                             </div>
                         </div>
                     ))}
                 </div>
             )}
-
-            <ModalBox
-                open={open}
-                onClose={close}
-                size="4xl"
-                title={editing ? `Edit ${editing.name}` : 'Add company'}
-                footer={
-                    <>
-                        <button onClick={close} className="rounded-xl border border-charcoal/10 px-4 py-2.5 text-sm font-semibold">Cancel</button>
-                        <ButtonEmerald onClick={handleSave} loading={saving} className="!h-11">{editing ? 'Save changes' : 'Create company'}</ButtonEmerald>
-                    </>
-                }
-            >
-                <div className="space-y-8">
-                    <Section title="Company">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <Input label="Name" required value={form.name} handleChange={text('name')} placeholder="Shown on slips and as sender name" />
-                            <Input label="Code" required={!editing} disabled={!!editing} value={form.code} handleChange={e => set('code', e.target.value.toLowerCase())} placeholder="smb-proptech" helperText={editing ? `Read-only. Used in reference numbers such as ${form.code.toUpperCase()}-LTR-2026-0001.` : 'Lowercase letters, numbers and dashes. It cannot be changed later.'} />
-                            <Input label="Legal name" value={form.legalName} handleChange={text('legalName')} />
-                            <Input label="Default currency" maxLength={3} value={form.currency} handleChange={e => set('currency', e.target.value.toUpperCase())} />
-                            <Input label="Address" value={form.address} handleChange={text('address')} containerClassName="sm:col-span-2" />
-                            <Input label="Phone" value={form.phone} handleChange={text('phone')} />
-                            <Input label="Website" value={form.website} handleChange={text('website')} placeholder="https://" />
-                        </div>
-                    </Section>
-
-                    <Section title="Letters" hint="Every letter from this company uses this design; only the text changes. Certificates use the certificate layout.">
-                        <SelectField
-                            label="Letterhead design"
-                            name="letterhead"
-                            value={form.letterhead}
-                            onChange={e => set('letterhead', e.target.value)}
-                            options={LETTERHEAD_DESIGNS.map(d => ({ value: d.value, label: d.label }))}
-                            placeholder="Default: the design with the same code, else Plain"
-                        />
-                    </Section>
-
-                    <Section title="Branding" hint="Email apps load the logo from the internet, so use a public URL. A path such as /images/axis-aura.png is resolved against your frontend URL.">
-                        <div className="grid gap-4 sm:grid-cols-[200px_0.5fr_200px]">
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-charcoal">Choose Company Logo(only png,jpg)</label>
-
-                                <input
-                                    type="file"
-                                    name='logo'
-                                    accept='image/png,image/jpg,.png,.jpg'
-                                    // accept={RECEIPT_TYPES.join(",")}
-                                    placeholder='Choose Logo '
-                                    onChange={handleFileChange}
-                                    className="block w-full text-sm text-charcoal/60 file:mr-3 file:rounded-lg file:border-0 file:bg-blue-50 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-blue-700 hover:file:bg-blue-100"
-                                />
-                            </div>
-                            {form.logo &&
-                                <div className='w-30 h-30 rounded-xl bg-gray-200'>
-                                    <img src={form.logo} alt="" className='w-full h-full object-contain' />
-                                </div>}
-                            {/* <Input label="Logo" value={form.logo} handleChange={text('logo')} placeholder="/images/company.png or https://..." /> */}
-                            <div>
-                                <label className="mb-2 block text-sm font-medium text-charcoal">Brand colour</label>
-                                <div className="flex items-center gap-2">
-                                    <input type="color" value={/^#[0-9a-fA-F]{6}$/.test(form.brandColor) ? form.brandColor : '#0136B0'} onChange={e => set('brandColor', e.target.value)} className="h-11 w-12 cursor-pointer rounded-xl border border-charcoal/10 bg-white p-1" aria-label="Pick brand colour" />
-                                    <Input value={form.brandColor} handleChange={text('brandColor')} placeholder="#0136B0" />
-                                </div>
-                            </div>
-                        </div>
-                    </Section>
-
-                    <Section title="Slip email" hint="Gmail only sends from your own address or a verified alias. Any other sender email is replaced by the default account, but the display name still changes.">
-                        <div className="grid gap-4 sm:grid-cols-2">
-                            <Input label="Sender name" value={form.fromName} handleChange={text('fromName')} placeholder="Defaults to the company name" />
-                            <Input label="Sender email" type="email" value={form.fromEmail} handleChange={text('fromEmail')} />
-                            <Input label="Reply-to email" type="email" value={form.replyTo} handleChange={text('replyTo')} />
-                            <Input label="Footer note" value={form.footerNote} handleChange={text('footerNote')} placeholder="Shown at the bottom of every slip" />
-                        </div>
-                    </Section>
-
-                    <Section title="Approved by" hint="Printed as the signatory on salary slips.">
-                        <div className="grid gap-4 sm:grid-cols-3">
-                            <Input label="Name" value={form.signatoryName} handleChange={text('signatoryName')} />
-                            <Input label="Title" value={form.signatoryTitle} handleChange={text('signatoryTitle')} />
-                            <Input label="Signature text (salary slips)" value={form.signature} handleChange={text('signature')} helperText="Printed on salary slips only. Letters and certificates are signed with the signature image when issuing." />
-                        </div>
-                    </Section>
-
-                    <label className="flex cursor-pointer items-center gap-3 text-sm text-charcoal">
-                        <input type="checkbox" checked={form.isActive} onChange={e => set('isActive', e.target.checked)} className="size-4 accent-blue-600" />
-                        Active, available when assigning employees, salaries and expenses
-                    </label>
-                </div>
-            </ModalBox>
         </>
     );
 };

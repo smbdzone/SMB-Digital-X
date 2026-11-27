@@ -13,7 +13,6 @@ import {
     MILESTONE_STATUS_OPTIONS,
     reorderMilestones,
     toggleDeliverable,
-    updateMilestonePayment,
     updateMilestoneStatus,
     type Deliverable,
     type Milestone,
@@ -105,13 +104,12 @@ interface ItemProps {
     onMove: (direction: -1 | 1) => void
     onComplete: () => void
     onStatus: (status: MilestoneStatus) => void
-    onPayment: (status: MilestonePaymentStatus) => void
     onDeliverable: (d: Deliverable) => void
 }
 
 const MilestoneItem = ({
     m, index, open, busy, canReorder, isFirst, isLast,
-    onToggle, onEdit, onDelete, onMove, onComplete, onStatus, onPayment, onDeliverable,
+    onToggle, onEdit, onDelete, onMove, onComplete, onStatus, onDeliverable,
 }: ItemProps) => {
     const pct = m.deliverablesTotal ? (m.deliverablesDone / m.deliverablesTotal) * 100 : 0
 
@@ -338,7 +336,6 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
         setFormOpen(true)
     }
 
-    const remainingPercent = Math.max(0, (summary?.unallocatedPercent ?? 100) + (editing?.paymentPercentage ?? 0))
 
     return (
         <section className="space-y-6">
@@ -388,7 +385,7 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
 
                             {budget <= 0 && (
                                 <div className="mt-5 rounded-xl bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                                    This project&apos;s budget is 0, so payment amounts cannot be calculated. Set a budget on the project first.
+                                    This project&apos;s budget is 0, so payment amounts cannot be calculated. The budget is set in the Owner Console.
                                 </div>
                             )}
                         </div>
@@ -451,7 +448,6 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
                                                 onMove={dir => move(fullIndex, dir)}
                                                 onComplete={() => run(m._id, t => updateMilestoneStatus(t, m._id, 'completed'), 'Milestone completed')}
                                                 onStatus={s => run(m._id, t => updateMilestoneStatus(t, m._id, s), 'Status updated')}
-                                                onPayment={s => run(m._id, t => updateMilestonePayment(t, m._id, s), 'Payment status updated')}
                                                 onDeliverable={d => run(m._id, t => toggleDeliverable(t, m._id, d._id, !d.isDone))}
                                             />
                                         )
@@ -468,9 +464,7 @@ const ProjectMilestones = ({ projectId, data, loading, error, reload }: Props) =
                 onClose={() => setFormOpen(false)}
                 projectId={projectId}
                 milestone={editing}
-                budget={budget}
                 defaultCurrency={cur ?? 'AED'}
-                remainingPercent={remainingPercent}
                 onSaved={reload}
             />
         </section>

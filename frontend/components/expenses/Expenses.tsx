@@ -3,7 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import OwnerConsoleNote from '@/components/ui/OwnerConsoleNote';
 import {
-    FiCheck, FiEdit, FiEye, FiPaperclip, FiPlus, FiSearch, FiTrash2, FiX,
+    FiEdit, FiEye, FiPaperclip, FiPlus, FiSearch, FiX,
 } from "react-icons/fi";
 
 import ModalBox from "@/components/ui/ModalBox";
@@ -20,10 +20,8 @@ import {
     EXPENSE_STATUSES,
     Expense,
     ExpenseReceipt,
-    ExpenseStatus,
     PAYMENT_METHODS,
     createExpense,
-    deleteExpense,
     deleteReceipt,
     expenseCompanyId,
     expenseCompanyName,
@@ -33,7 +31,6 @@ import {
     fetchExpenses,
     fetchProjectExpenses,
     updateExpense,
-    updateExpenseStatus,
     uploadReceipt,
 } from "@/services/expense.services";
 import type { Pagination as PaginationData } from "@/services/salary.services";
@@ -90,26 +87,6 @@ const emptyForm = (projectId = "", companyId = ""): ExpenseForm => ({
     notes: "",
 });
 
-// what an admin can do next, per current status
-const STATUS_ACTIONS: Record<ExpenseStatus, { to: ExpenseStatus; label: string; tone: string }[]> = {
-    pending: [
-        { to: "approved", label: "Approve", tone: "bg-emerald-600 text-white hover:bg-emerald-700" },
-        { to: "rejected", label: "Reject", tone: "border border-red-200 text-red-600 hover:bg-red-50" },
-    ],
-    approved: [
-        { to: "reimbursed", label: "Mark reimbursed", tone: "bg-emerald-600 text-white hover:bg-emerald-700" },
-        { to: "rejected", label: "Reject", tone: "border border-red-200 text-red-600 hover:bg-red-50" },
-        { to: "pending", label: "Back to pending", tone: "border border-charcoal/10 text-charcoal/70 hover:bg-charcoal/[0.03]" },
-    ],
-    rejected: [
-        { to: "approved", label: "Approve", tone: "bg-emerald-600 text-white hover:bg-emerald-700" },
-        { to: "pending", label: "Back to pending", tone: "border border-charcoal/10 text-charcoal/70 hover:bg-charcoal/[0.03]" },
-    ],
-    reimbursed: [
-        { to: "pending", label: "Back to pending", tone: "border border-charcoal/10 text-charcoal/70 hover:bg-charcoal/[0.03]" },
-    ],
-};
-
 const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesProps) => {
     const fullPage = showProject;
     const { token, role, user } = useAuth();
@@ -148,9 +125,6 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
     const [saving, setSaving] = useState(false);
 
     const [detail, setDetail] = useState<Expense | null>(null);
-    const [rejectTarget, setRejectTarget] = useState<Expense | null>(null);
-    const [rejectReason, setRejectReason] = useState("");
-    const [actionId, setActionId] = useState<string | null>(null);
 
     /* ---------- loading ---------- */
     useEffect(() => {
@@ -381,49 +355,6 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
         }
     };
 
-    /* ---------- status / delete ---------- */
-    const changeStatus = async (expense: Expense, status: ExpenseStatus, reason?: string) => {
-        if (!token) return;
-        setActionId(expense._id);
-        try {
-            const response = await updateExpenseStatus(token, expense._id, { status, reason });
-            toast.showSuccess(response.message || `Expense marked as ${status}`);
-            if (detail?._id === expense._id) setDetail(response.data ?? null);
-            setRejectTarget(null);
-            setRejectReason("");
-            await afterChange();
-        } catch (error) {
-            toast.showError(errorMessage(error, "Failed to update status"));
-        } finally {
-            setActionId(null);
-        }
-    };
-
-    const startAction = (expense: Expense, status: ExpenseStatus) => {
-        if (status === "rejected") {
-            setRejectTarget(expense);
-            setRejectReason("");
-        } else {
-            changeStatus(expense, status);
-        }
-    };
-
-    const handleDelete = async (expense: Expense) => {
-        if (!token || !confirm("Delete this expense? It stays in the audit history but disappears from all lists and totals.")) return;
-        setActionId(expense._id);
-        try {
-            await deleteExpense(token, expense._id);
-            toast.showSuccess("Expense deleted");
-            setDetail(null);
-            await afterChange();
-        } catch (error) {
-            toast.showError(errorMessage(error, "Failed to delete expense"));
-        } finally {
-            setActionId(null);
-        }
-    };
-
-    /* ---------- render ---------- */
     const th = "px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500";
     const colCount = fullPage ? (isAdmin ? 9 : 7) : 5;
 
@@ -547,9 +478,8 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
                         ) : (
                             expenses.map(expense => {
                                 const project = expenseProject(expense);
-                                const busy = actionId === expense._id;
                                 return (
-                                    <tr key={expense._id} className={busy ? "opacity-60" : ""}>
+                                    <tr key={expense._id}>
                                         <td className="whitespace-nowrap px-4 py-4 text-sm text-gray-600">{formatDate(expense.date)}</td>
                                         <td className="max-w-[260px] px-4 py-4">
                                             <p className="truncate text-sm font-medium text-gray-900">{expense.description}</p>
@@ -651,45 +581,13 @@ const Expenses = ({ projectId, showProject = false, onExpenseChange }: ExpensesP
                         </div>
 
                         <div className="flex flex-wrap justify-end gap-2 border-t border-charcoal/5 pt-5">
-                            {isAdmin && STATUS_ACTIONS[detail.status]?.map(action => (
-                                <button
-                                    key={action.to}
-                                    onClick={() => startAction(detail, action.to)}
-                                    disabled={actionId === detail._id}
-                                    className={`rounded-xl px-4 py-2.5 text-sm font-semibold transition disabled:opacity-50 ${action.tone}`}
-                                >
-                                    {action.label}
-                                </button>
-                            ))}
+                            {isAdmin && <OwnerConsoleNote className="mr-auto">Approve, reject, reimburse or delete it in the Owner Console.</OwnerConsoleNote>}
                             {canEdit(detail) && (
                                 <button onClick={() => openEdit(detail)} className="rounded-xl border border-charcoal/10 px-4 py-2.5 text-sm font-semibold transition hover:bg-charcoal/[0.03]">Edit</button>
                             )}
                         </div>
                     </div>
                 )}
-            </ModalBox>
-
-            {/* Reject */}
-            <ModalBox
-                open={!!rejectTarget}
-                onClose={() => setRejectTarget(null)}
-                size="md"
-                title="Reject expense"
-                description="The person who added it will see this reason."
-                footer={
-                    <>
-                        <button onClick={() => setRejectTarget(null)} className="rounded-xl border border-charcoal/10 px-4 py-2.5 text-sm font-semibold">Cancel</button>
-                        <button
-                            onClick={() => rejectTarget && changeStatus(rejectTarget, "rejected", rejectReason.trim())}
-                            disabled={!rejectReason.trim() || actionId === rejectTarget?._id}
-                            className="rounded-xl bg-red-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-red-700 disabled:opacity-50"
-                        >
-                            Reject expense
-                        </button>
-                    </>
-                }
-            >
-                <TextAreaField label="Reason" name="reason" value={rejectReason} onChange={e => setRejectReason(e.target.value)} placeholder="For example: receipt is missing" required rows={3} />
             </ModalBox>
 
             {/* Add / edit */}
